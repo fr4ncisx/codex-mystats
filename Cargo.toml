@@ -1,0 +1,22 @@
+[package]
+name = "codex-mystats"
+version = "0.2.1"
+description = "Codex-MyStats desktop panel for Codex usage limits"
+authors = ["Codex-MyStats contributors"]
+edition = "2021"
+rust-version = "1.78"
+
+[lib]
+name = "codex_mystats_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2.5.3"
+
+\n

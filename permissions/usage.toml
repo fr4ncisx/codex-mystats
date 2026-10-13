@@ -1,0 +1,13 @@
+[[permission]]
+identifier = "allow-usage-commands"
+description = "Permite consultar límites, guardar preferencias, controlar la ventana y cerrar la aplicación."
+commands.allow = [
+  "get_usage_state",
+  "load_settings",
+  "save_settings",
+  "minimize_panel",
+  "set_always_on_top",
+  "quit_app"
+]
+
+\n

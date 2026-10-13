@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Permisos mínimos del panel local de uso de Codex.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-usage-commands",
+    "core:event:allow-listen",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor",
+    "core:window:allow-set-size",
+    "core:window:allow-set-min-size"
+  ]
+}
+
+\n

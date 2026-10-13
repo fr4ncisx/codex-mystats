@@ -1,0 +1,5 @@
+/target/
+/dist/
+/.cargo-home/
+/.tauri/
+/gen/schemas/
