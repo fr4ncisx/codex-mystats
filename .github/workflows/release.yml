@@ -1,0 +1,135 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows executable
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+
+      - name: Verify tag matches the app version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $metadataJson = cargo metadata --locked --no-deps --format-version 1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cargo metadata validation failed."
+          }
+          $metadata = $metadataJson | ConvertFrom-Json
+          $manifestVersion = ($metadata.packages | Where-Object { $_.name -eq "codex-mystats" }).version
+          $appVersion = (Get-Content -Raw tauri.conf.json | ConvertFrom-Json).version
+          if ($manifestVersion -ne $appVersion) {
+            throw "Cargo.toml version $manifestVersion does not match tauri.conf.json version $appVersion."
+          }
+          if ($env:RELEASE_TAG -ne "v$appVersion") {
+            throw "Release tag $($env:RELEASE_TAG) does not match app version v$appVersion."
+          }
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "=2.12.2" --locked
+
+      - name: Build executable without installer
+        run: cargo tauri build --no-bundle
+
+      - name: Stage executable and checksum
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $executablePath = "target\release\codex-mystats.exe"
+          if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
+            throw "The Windows executable was not produced."
+          }
+          New-Item -ItemType Directory -Path "release-assets" | Out-Null
+          $executableName = "Codex-MyStats-$($env:RELEASE_TAG)-windows-x64.exe"
+          $stagedExecutablePath = Join-Path "release-assets" $executableName
+          Copy-Item -LiteralPath $executablePath -Destination $stagedExecutablePath
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stagedExecutablePath).Hash.ToLowerInvariant()
+          "$hash  $executableName" | Set-Content -LiteralPath "$stagedExecutablePath.sha256" -Encoding ascii
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 1
+
+  draft-release:
+    name: Create or update draft release
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-release-assets
+          path: release-assets
+
+      - name: Create or update draft release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $repositoryParts = $env:GITHUB_REPOSITORY.Split('/')
+          $owner = $repositoryParts[0]
+          $repository = $repositoryParts[1]
+          $api = "https://api.github.com/repos/$owner/$repository"
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2026-03-10"
+          }
+
+          $release = $null
+          try {
+            $release = Invoke-RestMethod -Method Get -Uri "$api/releases/tags/$($env:RELEASE_TAG)" -Headers $headers
+          } catch {
+            if ([int]$_.Exception.Response.StatusCode -ne 404) {
+              throw
+            }
+          }
+
+          if ($null -eq $release) {
+            $payload = @{
+              tag_name = $env:RELEASE_TAG
+              name = "Codex-MyStats $($env:RELEASE_TAG)"
+              draft = $true
+              prerelease = $false
+              generate_release_notes = $true
+            } | ConvertTo-Json
+            $release = Invoke-RestMethod -Method Post -Uri "$api/releases" -Headers $headers -ContentType "application/json" -Body $payload
+          } elseif (-not $release.draft) {
+            throw "Release $($env:RELEASE_TAG) is already published; refusing to replace its assets."
+          }
+
+          $assetFiles = @(Get-ChildItem "release-assets" -File)
+          $assetNames = @($assetFiles | ForEach-Object { $_.Name })
+          foreach ($asset in $release.assets) {
+            if ($assetNames -contains $asset.name) {
+              Invoke-RestMethod -Method Delete -Uri "$api/releases/assets/$($asset.id)" -Headers $headers | Out-Null
+            }
+          }
+
+          foreach ($assetFile in $assetFiles) {
+            $encodedName = [Uri]::EscapeDataString($assetFile.Name)
+            $uploadUri = "https://uploads.github.com/repos/$owner/$repository/releases/$($release.id)/assets?name=$encodedName"
+            Invoke-RestMethod -Method Post -Uri $uploadUri -Headers $headers -ContentType "application/octet-stream" -InFile $assetFile.FullName | Out-Null
+          }
