@@ -9,5 +9,3 @@ commands.allow = [
   "set_always_on_top",
   "quit_app"
 ]
-
-\n

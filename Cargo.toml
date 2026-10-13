@@ -18,5 +18,3 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2.5.3"
-
-\n
