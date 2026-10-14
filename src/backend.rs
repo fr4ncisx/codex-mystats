@@ -55,6 +55,12 @@ impl UsageState {
         self.last_updated_at = Some(received_at);
     }
 
+    fn clear_windows(&mut self) {
+        self.five_hour = None;
+        self.weekly = None;
+        self.last_updated_at = None;
+    }
+
     fn status(&mut self, status: &str, message: &str) {
         self.status = status.to_owned();
         self.message = message.to_owned();
@@ -290,6 +296,9 @@ fn apply_rate_notification(
 ) -> bool {
     snapshot.last_notification_at = Some(received_at);
     let Some(windows) = params.and_then(parse_rate_limits) else {
+        // Do not keep rendering a previous snapshot as if this notification
+        // had refreshed it. The follow-up read will repopulate both windows.
+        snapshot.clear_windows();
         snapshot.status("refreshing", "Actualizando desde Codex…");
         return true;
     };
@@ -872,6 +881,39 @@ mod tests {
         assert_eq!(state.five_hour.unwrap().remaining_percent, "87.5");
         assert!(state.weekly.is_none());
         assert_eq!(state.last_notification_at, Some(1000));
+    }
+
+    #[test]
+    fn malformed_notification_clears_cached_windows_until_full_read_succeeds() {
+        let mut state = UsageState {
+            status: "online".into(),
+            message: "ok".into(),
+            five_hour: Some(crate::protocol::UsageWindow {
+                window_duration_mins: 300,
+                used_percent: "39".into(),
+                remaining_percent: "61".into(),
+                remaining_fraction: 0.61,
+                resets_at: 1_792_000_000,
+            }),
+            weekly: Some(crate::protocol::UsageWindow {
+                window_duration_mins: 10_080,
+                used_percent: "31".into(),
+                remaining_percent: "69".into(),
+                remaining_fraction: 0.69,
+                resets_at: 1_792_000_000,
+            }),
+            last_updated_at: Some(1_000),
+            last_notification_at: None,
+        };
+
+        let should_read = apply_rate_notification(&mut state, None, 2_000);
+
+        assert!(should_read);
+        assert_eq!(state.status, "refreshing");
+        assert_eq!(state.five_hour, None);
+        assert_eq!(state.weekly, None);
+        assert_eq!(state.last_updated_at, None);
+        assert_eq!(state.last_notification_at, Some(2_000));
     }
 
     #[test]

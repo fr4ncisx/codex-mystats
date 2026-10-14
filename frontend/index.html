@@ -9,7 +9,7 @@
     <script src="./app.js" defer></script>
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" data-ultra-compact="false">
       <span class="resize-edge resize-edge--north" data-resize-direction="North" aria-hidden="true"></span>
       <span class="resize-edge resize-edge--east" data-resize-direction="East" aria-hidden="true"></span>
       <span class="resize-edge resize-edge--south" data-resize-direction="South" aria-hidden="true"></span>
@@ -26,17 +26,17 @@
         <div class="drag-handle" data-tauri-drag-region aria-hidden="true"></div>
         <nav class="header-actions" aria-label="Window actions" data-i18n-aria="windowActions">
           <button
-            class="icon-button topmost-toggle"
-            id="always-on-top-button"
+            class="icon-button ultra-compact-toggle"
+            id="ultra-compact-button"
             type="button"
-            aria-label="Turn off always on top"
-            title="Turn off always on top"
-            data-i18n-aria="alwaysOnTopOn"
-            data-i18n-title="alwaysOnTopOn"
-            aria-pressed="true"
+            aria-label="Turn on ultra-compact mode"
+            title="Turn on ultra-compact mode"
+            data-i18n-aria="ultraCompactOff"
+            data-i18n-title="ultraCompactOff"
+            aria-pressed="false"
           >
-            <span class="lucide-icon lucide-icon--pin" aria-hidden="true"></span>
-            <span class="lucide-icon lucide-icon--pin-off" aria-hidden="true" hidden></span>
+            <span class="lucide-icon lucide-icon--compact" aria-hidden="true"></span>
+            <span class="lucide-icon lucide-icon--expand" aria-hidden="true" hidden></span>
           </button>
           <button
             class="icon-button"
@@ -137,6 +137,17 @@
                 <button class="language-option" id="language-es" type="button" lang="es" aria-pressed="false">Español</button>
               </div>
             </section>
+            <label class="setting-card always-on-top-setting" for="always-on-top-toggle">
+              <span class="setting-label" id="always-on-top-label" data-i18n="alwaysOnTopLabel">Keep the window on top</span>
+              <input
+                class="setting-switch"
+                id="always-on-top-toggle"
+                type="checkbox"
+                role="switch"
+                aria-labelledby="always-on-top-label"
+                checked
+              />
+            </label>
             <section class="remembered-close-setting" id="remembered-close-setting" aria-labelledby="close-setting-label" hidden>
               <div class="remembered-close-copy">
                 <span class="setting-label" id="close-setting-label" data-i18n="closeSettingLabel">When closing the window</span>
@@ -209,7 +220,7 @@
       <dialog class="close-dialog" id="close-dialog" aria-labelledby="close-dialog-title">
         <form method="dialog" class="close-dialog-content">
           <h2 id="close-dialog-title" data-i18n="closeDialogTitle">What would you like to do?</h2>
-          <p data-i18n="closeDialogBody">Minimize to the tray or close the application.</p>
+          <p data-i18n="closeDialogBody">Minimize to the tray or quit Codex-MyStats.</p>
           <label class="remember-choice" for="remember-close-choice">
             <input id="remember-close-choice" type="checkbox" />
             <span data-i18n="rememberCloseChoice">Remember my choice</span>
@@ -217,8 +228,8 @@
           <p class="close-preference-error" id="close-preference-error" role="status" aria-live="polite" hidden></p>
           <div class="close-dialog-actions">
             <button class="dialog-button" id="cancel-close-button" value="cancel" type="button" data-i18n="cancel">Cancel</button>
-            <button class="dialog-button" id="minimize-close-button" value="minimize" type="button" data-i18n="closeAndMinimize">Close and minimize</button>
-            <button class="dialog-button dialog-button--danger" id="quit-close-button" value="quit" type="button" data-i18n="exitApp">Exit app</button>
+            <button class="dialog-button" id="minimize-close-button" value="minimize" type="button" aria-label="Minimize in the tray" title="Minimize in the tray" data-i18n-aria="minimizeToTray" data-i18n-title="minimizeToTray" data-i18n="minimizeAction">Minimize</button>
+            <button class="dialog-button dialog-button--danger" id="quit-close-button" value="quit" type="button" aria-label="Quit Codex-MyStats" title="Quit Codex-MyStats" data-i18n-aria="quitCodexMyStats" data-i18n-title="quitCodexMyStats" data-i18n="quitAction">Quit</button>
           </div>
         </form>
       </dialog>

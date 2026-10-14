@@ -11,6 +11,11 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
+const NORMAL_WINDOW_SIZE: (f64, f64) = (360.0, 230.0);
+const NORMAL_WINDOW_MIN_SIZE: (f64, f64) = (320.0, 230.0);
+const ULTRA_COMPACT_WINDOW_SIZE: (f64, f64) = (300.0, 156.0);
+const ULTRA_COMPACT_WINDOW_MIN_SIZE: (f64, f64) = ULTRA_COMPACT_WINDOW_SIZE;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CloseAction {
@@ -55,6 +60,8 @@ pub struct Settings {
     pub always_on_top: bool,
     #[serde(default = "default_close_action")]
     pub close_action: CloseAction,
+    #[serde(default)]
+    pub ultra_compact: bool,
 }
 
 struct LanguageState(Mutex<Language>);
@@ -80,6 +87,7 @@ impl Default for Settings {
             ui_scale: default_ui_scale(),
             always_on_top: default_always_on_top(),
             close_action: default_close_action(),
+            ultra_compact: false,
         }
     }
 }
@@ -164,6 +172,27 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
 #[tauri::command]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
+}
+
+fn window_mode_sizes(ultra_compact: bool) -> ((f64, f64), (f64, f64)) {
+    if ultra_compact {
+        (ULTRA_COMPACT_WINDOW_MIN_SIZE, ULTRA_COMPACT_WINDOW_SIZE)
+    } else {
+        (NORMAL_WINDOW_MIN_SIZE, NORMAL_WINDOW_SIZE)
+    }
+}
+
+#[tauri::command]
+fn set_ultra_compact(app: AppHandle, ultra_compact: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "No se pudo cambiar el tamaño de la ventana.".to_owned())?;
+    let (minimum, size) = window_mode_sizes(ultra_compact);
+
+    window
+        .set_min_size(Some(tauri::LogicalSize::new(minimum.0, minimum.1)))
+        .and_then(|()| window.set_size(tauri::LogicalSize::new(size.0, size.1)))
+        .map_err(|_| "No se pudo cambiar el tamaño de la ventana.".to_owned())
 }
 
 #[tauri::command]
@@ -501,7 +530,7 @@ pub fn run() {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = window.set_icon(icon.clone());
                 }
-                let _ = window.set_skip_taskbar(false);
+                let _ = window.set_skip_taskbar(true);
                 let close_target = window.clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
@@ -515,6 +544,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_usage_state,
             get_app_version,
+            set_ultra_compact,
             load_settings,
             save_settings,
             minimize_panel,
@@ -530,6 +560,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn app_version_is_exposed_to_the_main_window() {
+        assert_eq!(get_app_version(), env!("CARGO_PKG_VERSION"));
+
+        let permissions = include_str!("../permissions/usage.toml");
+        assert!(
+            permissions
+                .lines()
+                .any(|line| line.trim() == "\"get_app_version\","),
+            "get_app_version must be allowed by the main window capability"
+        );
+    }
+
+    #[test]
     fn threshold_defaults_and_bounds_are_explicit() {
         let defaults = Settings::default();
         assert_eq!(defaults.threshold_5h, 20.0);
@@ -543,6 +586,7 @@ mod tests {
             ui_scale: 100,
             always_on_top: true,
             close_action: CloseAction::Ask,
+            ultra_compact: false,
         }
         .is_valid());
         assert!(!Settings {
@@ -552,6 +596,7 @@ mod tests {
             ui_scale: 100,
             always_on_top: true,
             close_action: CloseAction::Ask,
+            ultra_compact: false,
         }
         .is_valid());
         assert!(!Settings {
@@ -561,6 +606,7 @@ mod tests {
             ui_scale: 105,
             always_on_top: true,
             close_action: CloseAction::Ask,
+            ultra_compact: false,
         }
         .is_valid());
     }
@@ -576,7 +622,8 @@ mod tests {
                 "language": "en",
                 "uiScale": 100,
                 "alwaysOnTop": true,
-                "closeAction": "ask"
+                "closeAction": "ask",
+                "ultraCompact": false
             })
         );
         let decoded: Settings = serde_json::from_value(encoded).unwrap();
@@ -584,6 +631,7 @@ mod tests {
         assert_eq!(decoded.ui_scale, 100);
         assert_eq!(decoded.language, Language::En);
         assert!(decoded.always_on_top);
+        assert!(!decoded.ultra_compact);
     }
 
     #[test]
@@ -598,5 +646,15 @@ mod tests {
         assert_eq!(decoded.ui_scale, 100);
         assert!(decoded.always_on_top);
         assert_eq!(decoded.language, Language::En);
+        assert!(!decoded.ultra_compact);
+    }
+
+    #[test]
+    fn compact_and_normal_window_sizes_are_distinct_and_bounded() {
+        assert_eq!(window_mode_sizes(true), ((300.0, 156.0), (300.0, 156.0)));
+        assert_eq!(
+            window_mode_sizes(false),
+            ((320.0, 230.0), NORMAL_WINDOW_SIZE)
+        );
     }
 }

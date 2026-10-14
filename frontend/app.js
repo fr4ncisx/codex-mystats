@@ -10,13 +10,16 @@ const translations = {
     windowTitle: "Codex MyStats",
     versionLoading: "Loading version",
     versionLabel: "Version {version}",
+    versionUnavailable: "Version unavailable",
     windowActions: "Window actions",
-    alwaysOnTopOn: "Turn off always on top",
-    alwaysOnTopOff: "Turn on always on top",
+    alwaysOnTopLabel: "Keep the window on top",
     settingsButton: "Settings",
     back: "Back",
     minimize: "Minimize",
     close: "Close",
+    ultraCompactOff: "Turn on ultra-compact mode",
+    ultraCompactOn: "Turn off ultra-compact mode",
+    windowSizeError: "Could not change the window size.",
     usageLimits: "Usage limits",
     fiveHour: "5 hours",
     weekly: "Weekly",
@@ -28,8 +31,8 @@ const translations = {
     resetOtherDay: "Resets {date} at {time}",
     statusConnecting: "Connecting…",
     statusRefreshing: "Updating limits…",
-    statusReconnecting: "Reconnecting. Data may be out of date.",
-    statusStale: "Could not update. Data may be out of date.",
+    statusReconnecting: "Reconnecting. Limits are temporarily unavailable.",
+    statusStale: "Could not update usage limits.",
     statusDisconnected: "Could not retrieve usage limits.",
     statusNeedsLogin: "Sign in to Codex to view your limits.",
     statusCliMissing: "Codex CLI not found. Install it and restart the app.",
@@ -56,23 +59,28 @@ const translations = {
     closePreferenceError: "Could not save this choice. Please try again.",
     closeActionError: "Could not change the close behavior.",
     closeDialogTitle: "What would you like to do?",
-    closeDialogBody: "Minimize to the tray or close the application.",
+    closeDialogBody: "Minimize to the tray or quit Codex-MyStats.",
     rememberCloseChoice: "Remember my choice",
     cancel: "Cancel",
-    closeAndMinimize: "Close and minimize",
-    exitApp: "Exit app",
+    minimizeAction: "Minimize",
+    minimizeToTray: "Minimize in the tray",
+    quitAction: "Quit",
+    quitCodexMyStats: "Quit Codex-MyStats",
   },
   es: {
     windowTitle: "Codex MyStats",
     versionLoading: "Cargando versión",
     versionLabel: "Versión {version}",
+    versionUnavailable: "Versión no disponible",
     windowActions: "Acciones de la ventana",
-    alwaysOnTopOn: "Desactivar siempre encima",
-    alwaysOnTopOff: "Activar siempre encima",
+    alwaysOnTopLabel: "Mantener la ventana siempre encima",
     settingsButton: "Configuración",
     back: "Volver",
     minimize: "Minimizar",
     close: "Cerrar",
+    ultraCompactOff: "Activar modo ultracompacto",
+    ultraCompactOn: "Desactivar modo ultracompacto",
+    windowSizeError: "No se pudo cambiar el tamaño de la ventana.",
     usageLimits: "Límites de uso",
     fiveHour: "5 horas",
     weekly: "Semanal",
@@ -84,8 +92,8 @@ const translations = {
     resetOtherDay: "Se restablece el {date} a las {time}",
     statusConnecting: "Conectando…",
     statusRefreshing: "Actualizando límites…",
-    statusReconnecting: "Reconectando. Los datos pueden estar desactualizados.",
-    statusStale: "No se pudo actualizar. Los datos pueden estar desactualizados.",
+    statusReconnecting: "Reconectando. Los límites no están disponibles por ahora.",
+    statusStale: "No se pudieron actualizar los límites.",
     statusDisconnected: "No se pudieron consultar los límites.",
     statusNeedsLogin: "Iniciá sesión en Codex para consultar los límites.",
     statusCliMissing: "Falta Codex CLI. Instalalo y reiniciá la app.",
@@ -112,11 +120,13 @@ const translations = {
     closePreferenceError: "No se pudo guardar la elección. Probá de nuevo.",
     closeActionError: "No se pudo cambiar el comportamiento al cerrar.",
     closeDialogTitle: "¿Qué querés hacer?",
-    closeDialogBody: "Podés minimizarla en la bandeja o cerrar la aplicación.",
+    closeDialogBody: "Minimizá en la bandeja o salí de Codex-MyStats.",
     rememberCloseChoice: "Recordar mi elección",
     cancel: "Cancelar",
-    closeAndMinimize: "Cerrar y minimizar",
-    exitApp: "Cerrar del todo",
+    minimizeAction: "Minimizar",
+    minimizeToTray: "Minimizar en la bandeja",
+    quitAction: "Salir",
+    quitCodexMyStats: "Salir de Codex-MyStats",
   },
 };
 
@@ -127,14 +137,19 @@ const initialSettings = {
   alwaysOnTop: true,
   closeAction: "ask",
   language: "en",
+  ultraCompact: false,
 };
 let settings = { ...initialSettings };
+let appVersion = null;
+let appVersionStatus = "loading";
+let nativeUltraCompact = false;
 let activeSettingsTab = "general";
 let saveTimer = null;
 let isSavingSettings = false;
 let settingsWriteChain = Promise.resolve();
 let saveMessageKey = "";
 let saveMessageIsError = false;
+let windowModeError = false;
 let usageState = {
   status: "connecting",
   fiveHour: null,
@@ -142,6 +157,7 @@ let usageState = {
 };
 
 const elements = {
+  appShell: document.querySelector(".app-shell"),
   appVersionBadge: document.getElementById("app-version-badge"),
   connectionMessage: document.getElementById("connection-message"),
   dashboardView: document.getElementById("dashboard-view"),
@@ -167,9 +183,10 @@ const elements = {
   threshold5hValue: document.getElementById("threshold-5h-value"),
   thresholdWeeklyRange: document.getElementById("threshold-weekly-range"),
   thresholdWeeklyValue: document.getElementById("threshold-weekly-value"),
-  alwaysOnTopButton: document.getElementById("always-on-top-button"),
-  alwaysOnTopIcon: document.querySelector("#always-on-top-button .lucide-icon--pin"),
-  alwaysOnTopOffIcon: document.querySelector("#always-on-top-button .lucide-icon--pin-off"),
+  alwaysOnTopToggle: document.getElementById("always-on-top-toggle"),
+  ultraCompactButton: document.getElementById("ultra-compact-button"),
+  ultraCompactIcon: document.querySelector("#ultra-compact-button .lucide-icon--compact"),
+  expandIcon: document.querySelector("#ultra-compact-button .lucide-icon--expand"),
   saveMessages: [...document.querySelectorAll("[data-save-message]")],
   rememberedCloseSetting: document.getElementById("remembered-close-setting"),
   rememberedCloseText: document.getElementById("remembered-close-text"),
@@ -206,10 +223,22 @@ function applyLocalization() {
 
   elements.languageEnButton.setAttribute("aria-pressed", String(language === "en"));
   elements.languageEsButton.setAttribute("aria-pressed", String(language === "es"));
-  updateAlwaysOnTopButton();
+  updateAlwaysOnTopToggle();
+  updateUltraCompactButton();
   updateSettingsButtonLabel();
   updateRememberedCloseSetting();
   renderSaveMessage();
+  renderAppVersion();
+}
+
+function renderAppVersion() {
+  const loading = appVersionStatus === "loading";
+  const label = appVersion
+    ? copy("versionLabel", { version: appVersion })
+    : copy(loading ? "versionLoading" : "versionUnavailable");
+  elements.appVersionBadge.textContent = appVersion ? "v" + appVersion : loading ? "v…" : "v—";
+  elements.appVersionBadge.setAttribute("aria-label", label);
+  elements.appVersionBadge.title = label;
 }
 
 function formatPercent(value) {
@@ -250,10 +279,8 @@ function statusCopy(status) {
 }
 
 function heatState(remaining) {
-  if (remaining > 50) return "safe";
-  if (remaining > 25) return "warm";
-  if (remaining > 10) return "hot";
-  return "critical";
+  const step = Math.min(9, Math.floor(Math.max(0, remaining) / 10));
+  return "step-" + step;
 }
 
 function setMeterThreshold(meter, threshold) {
@@ -261,15 +288,19 @@ function setMeterThreshold(meter, threshold) {
   meter.style.setProperty("--threshold-position", String(safeThreshold) + "%");
 }
 
+function setQuotaHeat(card, meter, heat) {
+  card.dataset.heat = heat;
+  meter.dataset.heat = heat;
+}
+
 function renderQuota(card, percentNode, meter, resetNode, windowData, threshold) {
-  card.classList.remove("quota--warning", "quota--critical", "quota--stale", "quota--unavailable");
+  card.classList.remove("quota--warning", "quota--critical", "quota--unavailable");
   setMeterThreshold(meter, threshold);
 
   if (!windowData) {
     card.classList.add("quota--unavailable");
-    if (usageState.status !== "online") card.classList.add("quota--stale");
     percentNode.textContent = "—";
-    meter.dataset.heat = "unavailable";
+    setQuotaHeat(card, meter, "unavailable");
     meter.style.setProperty("--meter-value", "0%");
     meter.removeAttribute("aria-valuenow");
     meter.setAttribute("aria-valuetext", copy("quotaUnavailable"));
@@ -281,9 +312,8 @@ function renderQuota(card, percentNode, meter, resetNode, windowData, threshold)
   const remainingLabel = Number(windowData.remainingPercent);
   if (!Number.isFinite(remaining) || !Number.isFinite(remainingLabel)) {
     card.classList.add("quota--unavailable");
-    if (usageState.status !== "online") card.classList.add("quota--stale");
     percentNode.textContent = "—";
-    meter.dataset.heat = "unavailable";
+    setQuotaHeat(card, meter, "unavailable");
     meter.style.setProperty("--meter-value", "0%");
     meter.removeAttribute("aria-valuenow");
     meter.setAttribute("aria-valuetext", copy("quotaUnavailable"));
@@ -295,7 +325,7 @@ function renderQuota(card, percentNode, meter, resetNode, windowData, threshold)
   const remainingText = formatPercent(windowData.remainingPercent);
   percentNode.textContent = remainingText;
   meter.style.setProperty("--meter-value", String(boundedRemaining) + "%");
-  meter.dataset.heat = heatState(boundedRemaining);
+  setQuotaHeat(card, meter, heatState(boundedRemaining));
   meter.setAttribute("aria-valuenow", String(boundedRemaining));
   meter.setAttribute(
     "aria-valuetext",
@@ -305,18 +335,22 @@ function renderQuota(card, percentNode, meter, resetNode, windowData, threshold)
 
   if (boundedRemaining <= threshold) card.classList.add("quota--warning");
   if (boundedRemaining <= Math.min(10, threshold)) card.classList.add("quota--critical");
-  if (usageState.status !== "online") card.classList.add("quota--stale");
 }
 
 function render() {
-  elements.connectionMessage.hidden = usageState.status === "online";
-  elements.connectionMessage.textContent = statusCopy(usageState.status);
+  const canShowUsage = usageState.status === "online" || usageState.status === "refreshing";
+  const hasUsageError = usageState.status !== "online";
+  elements.appShell.dataset.hasStatus = String(hasUsageError || windowModeError);
+  elements.connectionMessage.hidden = !hasUsageError && !windowModeError;
+  elements.connectionMessage.textContent = windowModeError
+    ? copy("windowSizeError")
+    : statusCopy(usageState.status);
   renderQuota(
     elements.fiveHourCard,
     elements.fiveHourPercent,
     elements.fiveHourProgress,
     elements.fiveHourReset,
-    usageState.fiveHour,
+    canShowUsage ? usageState.fiveHour : null,
     settings.threshold5h,
   );
   renderQuota(
@@ -324,7 +358,7 @@ function render() {
     elements.weeklyPercent,
     elements.weeklyProgress,
     elements.weeklyReset,
-    usageState.weekly,
+    canShowUsage ? usageState.weekly : null,
     settings.thresholdWeekly,
   );
 }
@@ -350,7 +384,8 @@ function settingsMatch(left, right) {
     && left.uiScale === right.uiScale
     && left.alwaysOnTop === right.alwaysOnTop
     && left.closeAction === right.closeAction
-    && left.language === right.language;
+    && left.language === right.language
+    && left.ultraCompact === right.ultraCompact;
 }
 
 function queueSettingsSave(delay = 300) {
@@ -430,29 +465,63 @@ function bindThreshold(range, number, key) {
   });
 }
 
-function updateAlwaysOnTopButton() {
-  const isEnabled = settings.alwaysOnTop;
-  const label = copy(isEnabled ? "alwaysOnTopOn" : "alwaysOnTopOff");
-  elements.alwaysOnTopButton.setAttribute("aria-pressed", String(isEnabled));
-  elements.alwaysOnTopButton.setAttribute("aria-label", label);
-  elements.alwaysOnTopButton.title = label;
-  elements.alwaysOnTopIcon.hidden = !isEnabled;
-  elements.alwaysOnTopOffIcon.hidden = isEnabled;
+function updateAlwaysOnTopToggle() {
+  elements.alwaysOnTopToggle.checked = settings.alwaysOnTop;
+}
+
+function updateUltraCompactButton() {
+  const isEnabled = settings.ultraCompact;
+  const label = copy(isEnabled ? "ultraCompactOn" : "ultraCompactOff");
+  elements.ultraCompactButton.setAttribute("aria-pressed", String(isEnabled));
+  elements.ultraCompactButton.setAttribute("aria-label", label);
+  elements.ultraCompactButton.title = label;
+  elements.ultraCompactIcon.hidden = isEnabled;
+  elements.expandIcon.hidden = !isEnabled;
+}
+
+async function setNativeWindowCompact(isCompact) {
+  if (nativeUltraCompact === isCompact) {
+    elements.appShell.dataset.ultraCompact = String(isCompact);
+    return;
+  }
+  await invoke("set_ultra_compact", { ultraCompact: isCompact });
+  nativeUltraCompact = isCompact;
+  elements.appShell.dataset.ultraCompact = String(isCompact);
+}
+
+async function toggleUltraCompact() {
+  const previousValue = settings.ultraCompact;
+  const nextValue = !previousValue;
+  const compactDashboard = nextValue && elements.settingsPanel.hidden;
+  settings = { ...settings, ultraCompact: nextValue };
+  updateUltraCompactButton();
+
+  try {
+    await setNativeWindowCompact(compactDashboard);
+    windowModeError = false;
+    render();
+    queueSettingsSave(0);
+  } catch {
+    settings = { ...settings, ultraCompact: previousValue };
+    updateUltraCompactButton();
+    windowModeError = true;
+    setSaveMessage("windowSizeError", true);
+    render();
+  }
 }
 
 async function toggleAlwaysOnTop() {
-  const nextValue = !settings.alwaysOnTop;
-  elements.alwaysOnTopButton.disabled = true;
+  const nextValue = elements.alwaysOnTopToggle.checked;
+  elements.alwaysOnTopToggle.disabled = true;
   try {
     await invoke("set_always_on_top", { alwaysOnTop: nextValue });
     settings = { ...settings, alwaysOnTop: nextValue };
-    updateAlwaysOnTopButton();
     queueSettingsSave(0);
   } catch {
+    elements.alwaysOnTopToggle.checked = settings.alwaysOnTop;
     setSaveMessage("topmostError", true);
-    elements.alwaysOnTopButton.title = copy("topmostError");
   } finally {
-    elements.alwaysOnTopButton.disabled = false;
+    elements.alwaysOnTopToggle.disabled = false;
   }
 }
 
@@ -478,7 +547,18 @@ function activateSettingsTab(tabName, moveFocus = false) {
   if (moveFocus) (isGeneral ? elements.generalTab : elements.limitsTab).focus();
 }
 
-function setSettingsVisible(visible) {
+async function setSettingsVisible(visible) {
+  const compactDashboard = settings.ultraCompact && !visible;
+  try {
+    await setNativeWindowCompact(compactDashboard);
+    windowModeError = false;
+  } catch {
+    windowModeError = true;
+    setSaveMessage("windowSizeError", true);
+    render();
+    return;
+  }
+
   elements.dashboardView.hidden = visible;
   elements.settingsPanel.hidden = !visible;
   updateSettingsButtonLabel();
@@ -606,9 +686,10 @@ async function resetClosePreference() {
 }
 
 elements.minimizeButton.addEventListener("click", minimizePanel);
-elements.alwaysOnTopButton.addEventListener("click", toggleAlwaysOnTop);
+elements.alwaysOnTopToggle.addEventListener("change", toggleAlwaysOnTop);
+elements.ultraCompactButton.addEventListener("click", toggleUltraCompact);
 elements.settingsButton.addEventListener("click", () => {
-  setSettingsVisible(elements.settingsPanel.hidden);
+  void setSettingsVisible(elements.settingsPanel.hidden);
 });
 elements.closeButton.addEventListener("click", openCloseDialog);
 elements.cancelCloseButton.addEventListener("click", closeCloseDialog);
@@ -644,19 +725,20 @@ bindThreshold(elements.threshold5hRange, elements.threshold5hValue, "threshold5h
 bindThreshold(elements.thresholdWeeklyRange, elements.thresholdWeeklyValue, "thresholdWeekly");
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !elements.settingsPanel.hidden) setSettingsVisible(false);
+  if (event.key === "Escape" && !elements.settingsPanel.hidden) void setSettingsVisible(false);
 });
 
 async function loadAppVersion() {
   try {
     const version = await invoke("get_app_version");
     if (typeof version !== "string" || !version) throw new Error("Invalid app version");
-    elements.appVersionBadge.textContent = "v" + version;
-    elements.appVersionBadge.setAttribute("aria-label", copy("versionLabel", { version }));
-    elements.appVersionBadge.title = copy("versionLabel", { version });
+    appVersion = version;
+    appVersionStatus = "loaded";
   } catch {
-    elements.appVersionBadge.hidden = true;
+    appVersion = null;
+    appVersionStatus = "unavailable";
   }
+  renderAppVersion();
 }
 
 async function initialize() {
@@ -689,6 +771,9 @@ async function initialize() {
         language: ["en", "es"].includes(nextSettings.language)
           ? nextSettings.language
           : initialSettings.language,
+        ultraCompact: typeof nextSettings.ultraCompact === "boolean"
+          ? nextSettings.ultraCompact
+          : initialSettings.ultraCompact,
       };
     }
     elements.threshold5hRange.value = String(settings.threshold5h);
@@ -697,7 +782,8 @@ async function initialize() {
     elements.thresholdWeeklyValue.value = String(settings.thresholdWeekly);
     applyLocalization();
     activateSettingsTab(activeSettingsTab);
-    await loadAppVersion();
+    updateUltraCompactButton();
+    await setNativeWindowCompact(settings.ultraCompact);
     await invoke("set_always_on_top", { alwaysOnTop: settings.alwaysOnTop });
     render();
   } catch {
@@ -708,4 +794,5 @@ async function initialize() {
 
 applyLocalization();
 render();
+void loadAppVersion();
 initialize();

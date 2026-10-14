@@ -3,6 +3,8 @@ identifier = "allow-usage-commands"
 description = "Permite consultar límites, guardar preferencias, controlar la ventana y cerrar la aplicación."
 commands.allow = [
   "get_usage_state",
+  "get_app_version",
+  "set_ultra_compact",
   "load_settings",
   "save_settings",
   "minimize_panel",

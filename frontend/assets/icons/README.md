@@ -9,5 +9,7 @@ These local interface icons are from [Lucide](https://lucide.dev/), package `luc
 - `arrow-left.svg`
 - `minus.svg`
 - `x.svg`
+- `minimize-2.svg`
+- `maximize-2.svg`
 
 The full Lucide license and required notices are in `LUCIDE-LICENSE.txt`.

@@ -1,6 +1,6 @@
 [package]
 name = "codex-mystats"
-version = "0.2.1"
+version = "0.3.0"
 description = "Codex-MyStats desktop panel for Codex usage limits"
 authors = ["Codex-MyStats contributors"]
 edition = "2021"
