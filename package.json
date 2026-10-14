@@ -1,0 +1,12 @@
+{
+  "name": "codex-mystats-ui-tests",
+  "private": true,
+  "scripts": {
+    "test": "node tools/run-playwright.mjs test",
+    "test-ui": "node tools/run-playwright.mjs test --ui",
+    "install-browsers": "node tools/run-playwright.mjs install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}
