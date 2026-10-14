@@ -55,6 +55,11 @@ A compact Windows panel for Codex CLI's five-hour and weekly usage windows.
 
 See the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/) for platform setup. Node.js is not required to build the app.
 
+### To run UI tests
+
+- Node.js 24.
+- Chromium managed by Playwright. Install it once with `npm run install-browsers`.
+
 ---
 
 ## Run and build
@@ -75,6 +80,18 @@ cargo tauri build --no-bundle
 ```
 
 The executable is written to `target\release\codex-mystats.exe`.
+
+Run the frontend UI checks with Node.js 24 and Playwright:
+
+```powershell
+npm ci
+npm run install-browsers
+npm test
+```
+
+`npm test` runs the checks in the console. Run `npm run test-ui` to open Playwright's interactive test runner.
+
+These tools are only needed for frontend UI tests; they are not required to build the app.
 
 ---
 

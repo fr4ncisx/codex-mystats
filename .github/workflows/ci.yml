@@ -25,6 +25,12 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install frontend test dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npm run install-browsers
+
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
 
@@ -33,3 +39,22 @@ jobs:
 
       - name: Check frontend JavaScript syntax
         run: node --check frontend/app.js
+
+      - name: Run Playwright UI tests
+        run: npm test
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "=2.12.2" --locked
+
+      - name: Build Windows executable
+        run: cargo tauri build --no-bundle
+
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-diagnostics
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
