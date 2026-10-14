@@ -20,32 +20,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
 
-      - name: Verify version and release notes
-        shell: pwsh
-        run: |
-          $metadataJson = cargo metadata --locked --no-deps --format-version 1
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cargo metadata validation failed."
-          }
-          $metadata = $metadataJson | ConvertFrom-Json
-          $cargoVersion = ($metadata.packages | Where-Object { $_.name -eq "codex-mystats" }).version
-          $tauriVersion = (Get-Content -Raw tauri.conf.json | ConvertFrom-Json).version
-          if ($cargoVersion -ne $tauriVersion) {
-            throw "Cargo.toml version $cargoVersion does not match tauri.conf.json version $tauriVersion."
-          }
-          $releaseNotesPath = ".github/release-notes/v$tauriVersion.md"
-          if (-not (Test-Path -LiteralPath $releaseNotesPath -PathType Leaf)) {
-            throw "Curated release notes not found: $releaseNotesPath"
-          }
-          $releaseNotes = Get-Content -Raw -LiteralPath $releaseNotesPath -Encoding utf8
-          if ($releaseNotes -notmatch "(?m)^# Codex-MyStats v$([regex]::Escape($tauriVersion))$") {
-            throw "Release notes title does not match application version $tauriVersion."
-          }
-
       - name: Set up Node.js 24
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
+
+      - name: Verify version and release notes
+        run: node scripts/verify-release-metadata.mjs
 
       - name: Install frontend test dependencies
         run: npm ci
