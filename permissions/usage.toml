@@ -4,7 +4,11 @@ description = "Permite consultar límites, guardar preferencias, controlar la ve
 commands.allow = [
   "get_usage_state",
   "get_app_version",
+  "get_native_window_mode",
+  "show_main_panel",
   "set_ultra_compact",
+  "fit_settings_window",
+  "set_tray_tooltips",
   "load_settings",
   "save_settings",
   "minimize_panel",

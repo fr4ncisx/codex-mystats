@@ -31,7 +31,7 @@ const translations = {
     resetOtherDay: "Resets {date} at {time}",
     statusConnecting: "Connecting…",
     statusRefreshing: "Updating limits…",
-    statusReconnecting: "Reconnecting. Limits are temporarily unavailable.",
+    statusReconnecting: "Reconnecting. Limits unavailable.",
     statusStale: "Could not update usage limits.",
     statusDisconnected: "Could not retrieve usage limits.",
     statusNeedsLogin: "Sign in to Codex to view your limits.",
@@ -54,6 +54,9 @@ const translations = {
     fiveHourThresholdLabel: "5-hour remaining threshold, percent",
     weeklyThresholdLabel: "Weekly remaining threshold, percent",
     saveError: "Could not save changes.",
+    preferencesError: "Could not load preferences.",
+    eventsError: "Could not subscribe to usage updates.",
+    presentationError: "Could not load display colors.",
     invalidThreshold: "Enter a whole number from 0 to 100.",
     topmostError: "Could not change always-on-top.",
     closePreferenceError: "Could not save this choice. Please try again.",
@@ -115,6 +118,9 @@ const translations = {
     fiveHourThresholdLabel: "Umbral de porcentaje restante para 5 horas",
     weeklyThresholdLabel: "Umbral de porcentaje restante semanal",
     saveError: "No se pudieron guardar los cambios.",
+    preferencesError: "No se pudieron cargar las preferencias.",
+    eventsError: "No se pudo recibir actualizaciones de uso.",
+    presentationError: "No se pudieron cargar los colores.",
     invalidThreshold: "Ingresá un número entero entre 0 y 100.",
     topmostError: "No se pudo cambiar la opción de ventana siempre encima.",
     closePreferenceError: "No se pudo guardar la elección. Probá de nuevo.",
@@ -140,9 +146,26 @@ const initialSettings = {
   ultraCompact: false,
 };
 let settings = { ...initialSettings };
+let projectedSettings = { ...initialSettings };
+let persistedSettings = { ...initialSettings };
+let preferencesError = false;
+let eventsError = false;
+let presentationError = false;
+let lastUsageRevision = -1;
+let settingsFitChain = Promise.resolve();
+let lastSettingsHeight = 0;
+let settingsFitRevision = 0;
+let changingView = false;
+let resolveSettingsReady;
+const settingsReady = new Promise((resolve) => {
+  resolveSettingsReady = resolve;
+});
 let appVersion = null;
 let appVersionStatus = "loading";
 let nativeUltraCompact = false;
+let nativeResizeListenerPromise = null;
+let nativeResizeRevision = 0;
+const nativeResizeWaiters = new Set();
 let activeSettingsTab = "general";
 let saveTimer = null;
 let isSavingSettings = false;
@@ -229,6 +252,7 @@ function applyLocalization() {
   updateRememberedCloseSetting();
   renderSaveMessage();
   renderAppVersion();
+  scheduleSettingsFit();
 }
 
 function renderAppVersion() {
@@ -290,6 +314,10 @@ function setMeterThreshold(meter, threshold) {
 
 function setQuotaHeat(card, meter, heat) {
   card.dataset.heat = heat;
+  if (heat === "unavailable") {
+    delete card.dataset.alert;
+    for (const key of ["deep", "mid", "light"]) card.style.removeProperty("--water-" + key);
+  }
   meter.dataset.heat = heat;
 }
 
@@ -321,11 +349,14 @@ function renderQuota(card, percentNode, meter, resetNode, windowData, threshold)
     return;
   }
 
-  const boundedRemaining = Math.max(0, Math.min(100, remaining));
+  const boundedRemaining = Math.max(0, Math.min(100, remainingLabel));
   const remainingText = formatPercent(windowData.remainingPercent);
   percentNode.textContent = remainingText;
   meter.style.setProperty("--meter-value", String(boundedRemaining) + "%");
   setQuotaHeat(card, meter, heatState(boundedRemaining));
+  card.dataset.alert = boundedRemaining <= threshold ? "critical" : boundedRemaining <= threshold + 5 ? "warning" : "none";
+  const palette = window.UsageColors.palette(boundedRemaining, threshold);
+  if (palette) for (const key of ["deep", "mid", "light"]) card.style.setProperty("--water-" + key, window.UsageColors.hex(palette[key]));
   meter.setAttribute("aria-valuenow", String(boundedRemaining));
   meter.setAttribute(
     "aria-valuetext",
@@ -340,9 +371,9 @@ function renderQuota(card, percentNode, meter, resetNode, windowData, threshold)
 function render() {
   const canShowUsage = usageState.status === "online" || usageState.status === "refreshing";
   const hasUsageError = usageState.status !== "online";
-  elements.appShell.dataset.hasStatus = String(hasUsageError || windowModeError);
-  elements.connectionMessage.hidden = !hasUsageError && !windowModeError;
-  elements.connectionMessage.textContent = windowModeError
+  elements.appShell.dataset.hasStatus = String(hasUsageError || windowModeError || preferencesError || presentationError || eventsError);
+  elements.connectionMessage.hidden = !hasUsageError && !windowModeError && !preferencesError && !presentationError && !eventsError;
+  elements.connectionMessage.textContent = preferencesError ? copy("preferencesError") : presentationError ? copy("presentationError") : eventsError ? copy("eventsError") : windowModeError
     ? copy("windowSizeError")
     : statusCopy(usageState.status);
   renderQuota(
@@ -361,6 +392,24 @@ function render() {
     canShowUsage ? usageState.weekly : null,
     settings.thresholdWeekly,
   );
+  if (Number.isSafeInteger(usageState.revision)) {
+    const tooltip = (label, data) => `${label}: ${canShowUsage && data ? formatPercent(data.remainingPercent) + " " + copy("remaining") + " · " + formatReset(Number(data.resetsAt)) : copy("quotaUnavailable")}`;
+    void invoke("set_tray_tooltips", { fiveHour: tooltip(copy("fiveHour"), usageState.fiveHour), weekly: tooltip(copy("weekly"), usageState.weekly), revision: usageState.revision }).catch(() => {});
+  }
+}
+
+function acceptUsageState(next) {
+  if (!next || !Number.isSafeInteger(next.revision) || next.revision < lastUsageRevision) return;
+  lastUsageRevision = next.revision;
+  usageState = next;
+  render();
+}
+
+async function synchronizeUsage() {
+  try { acceptUsageState(await invoke("get_usage_state")); }
+  catch {
+    if (lastUsageRevision < 0) { usageState = { status: "disconnected", fiveHour: null, weekly: null }; render(); }
+  }
 }
 
 function renderSaveMessage() {
@@ -370,6 +419,7 @@ function renderSaveMessage() {
     if (saveMessageIsError) message.dataset.error = "true";
     else message.removeAttribute("data-error");
   }
+  scheduleSettingsFit();
 }
 
 function setSaveMessage(messageKey, isError = false) {
@@ -395,9 +445,15 @@ function queueSettingsSave(delay = 300) {
 }
 
 function writeSettings(snapshot) {
-  const operation = settingsWriteChain
-    .catch(() => {})
-    .then(() => invoke("save_settings", { settings: snapshot }));
+  if (preferencesError) return Promise.reject(new Error("Preferences unavailable"));
+  const keys = Object.keys(initialSettings);
+  const patch = Object.fromEntries(keys.filter((key) => snapshot[key] !== projectedSettings[key]).map((key) => [key, snapshot[key]]));
+  projectedSettings = { ...projectedSettings, ...patch };
+  const operation = settingsWriteChain.catch(() => {}).then(() => invoke("save_settings", { settings: patch })).then((response) => {
+    persistedSettings = { ...persistedSettings, ...response };
+    for (const key of Object.keys(patch)) if (settings[key] === snapshot[key]) settings[key] = response[key];
+    return { ...settings };
+  }).catch((error) => { projectedSettings = { ...persistedSettings }; throw error; });
   settingsWriteChain = operation;
   return operation;
 }
@@ -479,35 +535,147 @@ function updateUltraCompactButton() {
   elements.expandIcon.hidden = !isEnabled;
 }
 
-async function setNativeWindowCompact(isCompact) {
-  if (nativeUltraCompact === isCompact) {
-    elements.appShell.dataset.ultraCompact = String(isCompact);
-    return;
+async function ensureNativeResizeListener() {
+  if (!nativeResizeListenerPromise) {
+    nativeResizeListenerPromise = appWindow.onResized(({ payload }) => {
+      nativeResizeRevision += 1;
+      for (const waiter of nativeResizeWaiters) waiter(payload, nativeResizeRevision);
+    });
   }
-  await invoke("set_ultra_compact", { ultraCompact: isCompact });
-  nativeUltraCompact = isCompact;
-  elements.appShell.dataset.ultraCompact = String(isCompact);
+  await nativeResizeListenerPromise;
+}
+
+async function waitForNativeWindowSize(target, revisionBeforeRequest) {
+  await ensureNativeResizeListener();
+  const scaleFactor = await appWindow.scaleFactor();
+  const expected = {
+    width: Math.round(target.width * scaleFactor),
+    height: Math.round(target.height * scaleFactor),
+  };
+  const matches = (size) => size
+    && Math.abs(size.width - expected.width) <= 1
+    && Math.abs(size.height - expected.height) <= 1;
+  const current = await appWindow.innerSize();
+  if (matches(current)) return;
+
+  await new Promise((resolve, reject) => {
+    let timeout;
+    const waiter = (size, revision) => {
+      if (revision <= revisionBeforeRequest || !matches(size)) return;
+      nativeResizeWaiters.delete(waiter);
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    nativeResizeWaiters.add(waiter);
+    timeout = window.setTimeout(() => {
+      nativeResizeWaiters.delete(waiter);
+      reject(new Error("Native window resize was not confirmed"));
+    }, 1500);
+    void appWindow.innerSize().then((size) => {
+      if (!matches(size)) return;
+      nativeResizeWaiters.delete(waiter);
+      window.clearTimeout(timeout);
+      resolve();
+    }).catch(() => {});
+  });
+}
+
+function waitForPaint() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
+}
+
+async function setNativeWindowCompact(
+  isCompact,
+  preferredUltraCompact = null,
+  force = false,
+  previousPreference = null,
+) {
+  if (nativeUltraCompact === isCompact && preferredUltraCompact === null && !force) {
+    elements.appShell.dataset.ultraCompact = String(isCompact);
+    return null;
+  }
+  await ensureNativeResizeListener();
+  const revisionBeforeRequest = nativeResizeRevision;
+  const args = { ultraCompact: isCompact };
+  if (typeof preferredUltraCompact === "boolean") {
+    args.preferredUltraCompact = preferredUltraCompact;
+  }
+  let commandSucceeded = false;
+  const previousMode = nativeUltraCompact;
+  try {
+    const targetSize = await invoke("set_ultra_compact", args);
+    commandSucceeded = true;
+    if (!targetSize || !Number.isFinite(targetSize.width) || !Number.isFinite(targetSize.height)) {
+      throw new Error("Native window size was not returned");
+    }
+    await waitForNativeWindowSize(targetSize, revisionBeforeRequest);
+    nativeUltraCompact = isCompact;
+    elements.appShell.dataset.ultraCompact = String(isCompact);
+    return targetSize;
+  } catch (error) {
+    if (commandSucceeded) {
+      try {
+        const rollbackArgs = { ultraCompact: previousMode };
+        if (typeof previousPreference === "boolean") {
+          rollbackArgs.preferredUltraCompact = previousPreference;
+        }
+        const rollbackSize = await invoke("set_ultra_compact", rollbackArgs);
+        await waitForNativeWindowSize(rollbackSize, nativeResizeRevision);
+        nativeUltraCompact = previousMode;
+      } catch {
+        try {
+          nativeUltraCompact = await invoke("get_native_window_mode");
+        } catch {
+          nativeUltraCompact = previousMode;
+        }
+      }
+    }
+    elements.appShell.dataset.ultraCompact = String(nativeUltraCompact);
+    throw error;
+  }
 }
 
 async function toggleUltraCompact() {
+  if (changingView) return;
+  changingView = true;
   const previousValue = settings.ultraCompact;
   const nextValue = !previousValue;
   const compactDashboard = nextValue && elements.settingsPanel.hidden;
   settings = { ...settings, ultraCompact: nextValue };
   updateUltraCompactButton();
+  if (!elements.settingsPanel.hidden) {
+    try { await writeSettings({ ...settings }); }
+    catch { settings = { ...settings, ultraCompact: previousValue }; updateUltraCompactButton(); setSaveMessage("saveError", true); }
+    changingView = false;
+    scheduleSettingsFit();
+    return;
+  }
+  const transitioning = nativeUltraCompact !== compactDashboard;
+  if (transitioning) elements.appShell.dataset.modeTransition = "true";
 
   try {
-    await setNativeWindowCompact(compactDashboard);
+    await settingsWriteChain.catch(() => {});
+    await setNativeWindowCompact(compactDashboard, nextValue, false, previousValue);
     windowModeError = false;
     render();
-    queueSettingsSave(0);
+    if (transitioning) {
+      await waitForPaint();
+      delete elements.appShell.dataset.modeTransition;
+    }
   } catch {
     settings = { ...settings, ultraCompact: previousValue };
     updateUltraCompactButton();
     windowModeError = true;
     setSaveMessage("windowSizeError", true);
     render();
+    if (transitioning) {
+      await waitForPaint();
+      delete elements.appShell.dataset.modeTransition;
+    }
   }
+  changingView = false;
 }
 
 async function toggleAlwaysOnTop() {
@@ -545,28 +713,70 @@ function activateSettingsTab(tabName, moveFocus = false) {
   elements.generalPanel.hidden = !isGeneral;
   elements.limitsPanel.hidden = isGeneral;
   if (moveFocus) (isGeneral ? elements.generalTab : elements.limitsTab).focus();
+  scheduleSettingsFit();
 }
 
-async function setSettingsVisible(visible) {
-  const compactDashboard = settings.ultraCompact && !visible;
-  try {
-    await setNativeWindowCompact(compactDashboard);
-    windowModeError = false;
-  } catch {
+async function fitSettingsWindow() {
+  if (elements.settingsPanel.hidden) return;
+  const shellStyle = getComputedStyle(elements.appShell);
+  const header = document.querySelector(".window-actions");
+  const height = Math.ceil(header.getBoundingClientRect().height + elements.settingsPanel.getBoundingClientRect().height
+    + parseFloat(shellStyle.paddingTop) + parseFloat(shellStyle.paddingBottom)
+    + parseFloat(shellStyle.borderTopWidth) + parseFloat(shellStyle.borderBottomWidth)
+    + parseFloat(getComputedStyle(header).marginBottom));
+  if (height === lastSettingsHeight) return;
+  lastSettingsHeight = height;
+  const target = await invoke("fit_settings_window", { contentHeight: Math.max(120, height) });
+  await waitForNativeWindowSize(target, nativeResizeRevision);
+}
+
+function scheduleSettingsFit() {
+  if (changingView || elements.settingsPanel.hidden) return;
+  const revision = ++settingsFitRevision;
+  elements.appShell.dataset.modeTransition = "true";
+  settingsFitChain = settingsFitChain.catch(() => {}).then(fitSettingsWindow).catch(() => {
     windowModeError = true;
     setSaveMessage("windowSizeError", true);
     render();
-    return;
-  }
+  }).finally(async () => { await waitForPaint(); if (!changingView && revision === settingsFitRevision) delete elements.appShell.dataset.modeTransition; });
+}
 
-  elements.dashboardView.hidden = visible;
-  elements.settingsPanel.hidden = !visible;
-  updateSettingsButtonLabel();
-  if (visible) {
-    activateSettingsTab(activeSettingsTab);
-    (activeSettingsTab === "general" ? elements.generalTab : elements.limitsTab).focus();
-  } else {
-    elements.settingsButton.focus();
+new ResizeObserver(scheduleSettingsFit).observe(elements.settingsPanel);
+
+async function setSettingsVisible(visible) {
+  if (changingView) return;
+  changingView = true;
+  elements.appShell.dataset.modeTransition = "true";
+  try {
+    await settingsFitChain.catch(() => {});
+    await setNativeWindowCompact(settings.ultraCompact && !visible, null, true);
+    elements.dashboardView.hidden = visible;
+    elements.settingsPanel.hidden = !visible;
+    elements.appShell.dataset.view = visible ? "settings" : "dashboard";
+    updateSettingsButtonLabel();
+    windowModeError = false;
+    lastSettingsHeight = 0;
+    if (visible) {
+      activateSettingsTab(activeSettingsTab);
+      await waitForPaint();
+      await fitSettingsWindow();
+      (activeSettingsTab === "general" ? elements.generalTab : elements.limitsTab).focus();
+    } else { elements.settingsButton.focus(); }
+  } catch {
+    if (visible) {
+      elements.dashboardView.hidden = false;
+      elements.settingsPanel.hidden = true;
+      elements.appShell.dataset.view = "dashboard";
+      updateSettingsButtonLabel();
+      try { await setNativeWindowCompact(settings.ultraCompact, null, true); } catch {}
+    }
+    windowModeError = true;
+    setSaveMessage("windowSizeError", true);
+  } finally {
+    render();
+    await waitForPaint();
+    delete elements.appShell.dataset.modeTransition;
+    changingView = false;
   }
 }
 
@@ -590,7 +800,8 @@ function updateRememberedCloseSetting() {
   }
 }
 
-function openCloseDialog() {
+async function openCloseDialog() {
+  await settingsReady;
   if (settings.closeAction === "minimize") {
     void minimizePanel();
     return;
@@ -609,6 +820,14 @@ document.querySelectorAll("[data-resize-direction]").forEach((edge) => {
     if (event.button !== 0) return;
     event.preventDefault();
     appWindow.startResizeDragging(edge.dataset.resizeDirection).catch(() => {});
+  });
+});
+
+document.querySelectorAll(".window-brand, .drag-handle").forEach((region) => {
+  region.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button, input, select, a")) return;
+    event.preventDefault();
+    appWindow.startDragging().catch(() => {});
   });
 });
 
@@ -742,57 +961,41 @@ async function loadAppVersion() {
 }
 
 async function initialize() {
+  const versionReady = loadAppVersion();
+  try { await window.UsageColors.ready; } catch { presentationError = true; }
   try {
-    await listen("close-requested", openCloseDialog);
-    await listen("usage-state", (event) => {
-      if (event.payload && typeof event.payload === "object") {
-        usageState = event.payload;
-        render();
-      }
-    });
-    const [nextState, nextSettings] = await Promise.all([
-      invoke("get_usage_state"),
-      invoke("load_settings"),
-    ]);
-    if (nextState) usageState = nextState;
-    if (nextSettings) {
-      settings = {
-        threshold5h: Math.max(0, Math.min(100, Math.round(Number(nextSettings.threshold5h) || 0))),
-        thresholdWeekly: Math.max(0, Math.min(100, Math.round(Number(nextSettings.thresholdWeekly) || 0))),
-        uiScale: Number.isInteger(nextSettings.uiScale) && nextSettings.uiScale >= 80 && nextSettings.uiScale <= 150 && nextSettings.uiScale % 10 === 0
-          ? nextSettings.uiScale
-          : initialSettings.uiScale,
-        alwaysOnTop: typeof nextSettings.alwaysOnTop === "boolean"
-          ? nextSettings.alwaysOnTop
-          : initialSettings.alwaysOnTop,
-        closeAction: ["ask", "minimize", "quit"].includes(nextSettings.closeAction)
-          ? nextSettings.closeAction
-          : initialSettings.closeAction,
-        language: ["en", "es"].includes(nextSettings.language)
-          ? nextSettings.language
-          : initialSettings.language,
-        ultraCompact: typeof nextSettings.ultraCompact === "boolean"
-          ? nextSettings.ultraCompact
-          : initialSettings.ultraCompact,
-      };
-    }
-    elements.threshold5hRange.value = String(settings.threshold5h);
-    elements.threshold5hValue.value = String(settings.threshold5h);
-    elements.thresholdWeeklyRange.value = String(settings.thresholdWeekly);
-    elements.thresholdWeeklyValue.value = String(settings.thresholdWeekly);
-    applyLocalization();
-    activateSettingsTab(activeSettingsTab);
-    updateUltraCompactButton();
-    await setNativeWindowCompact(settings.ultraCompact);
-    await invoke("set_always_on_top", { alwaysOnTop: settings.alwaysOnTop });
-    render();
-  } catch {
-    usageState = { ...usageState, status: "disconnected" };
-    render();
-  }
+    await listen("usage-state", (event) => acceptUsageState(event.payload));
+  } catch { eventsError = true; }
+  try { await listen("close-requested", openCloseDialog); } catch {}
+  try { await listen("panel-restored", synchronizeUsage); } catch {}
+  try {
+    const saved = await invoke("load_settings");
+    settings = { ...initialSettings, ...saved };
+    settings.language = settings.language === "es" ? "es" : "en";
+    persistedSettings = { ...settings };
+    projectedSettings = { ...settings };
+  } catch { preferencesError = true; }
+  resolveSettingsReady();
+  applyLocalization();
+  activateSettingsTab(activeSettingsTab);
+  elements.threshold5hRange.value = elements.threshold5hValue.value = String(settings.threshold5h);
+  elements.thresholdWeeklyRange.value = elements.thresholdWeeklyValue.value = String(settings.thresholdWeekly);
+  try {
+    await ensureNativeResizeListener();
+    nativeUltraCompact = await invoke("get_native_window_mode");
+    elements.appShell.dataset.ultraCompact = String(nativeUltraCompact);
+    await setNativeWindowCompact(settings.ultraCompact, null, true);
+  } catch { windowModeError = true; }
+  try { await invoke("set_always_on_top", { alwaysOnTop: settings.alwaysOnTop }); }
+  catch { setSaveMessage("topmostError", true); }
+  await synchronizeUsage();
+  await versionReady;
+  render();
+  await waitForPaint();
+  try { await invoke("show_main_panel"); }
+  catch { windowModeError = true; render(); }
 }
 
 applyLocalization();
 render();
-void loadAppVersion();
 initialize();

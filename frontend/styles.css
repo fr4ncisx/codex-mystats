@@ -58,6 +58,12 @@ button { color: inherit; }
   padding: .25rem .5rem;
 }
 
+.app-shell[data-mode-transition="true"] .window-actions,
+.app-shell[data-mode-transition="true"] .main-content {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .resize-edge {
   position: absolute;
   z-index: 10;
@@ -65,17 +71,6 @@ button { color: inherit; }
   pointer-events: auto;
   touch-action: none;
 }
-
-.resize-edge--north,
-.resize-edge--south {
-  right: 10px;
-  left: 10px;
-  height: 8px;
-  cursor: ns-resize;
-}
-
-.resize-edge--north { top: 0; }
-.resize-edge--south { bottom: 0; }
 
 .resize-edge--east,
 .resize-edge--west {
@@ -87,19 +82,6 @@ button { color: inherit; }
 
 .resize-edge--east { right: 0; }
 .resize-edge--west { left: 0; }
-
-.resize-edge--north-east,
-.resize-edge--south-east,
-.resize-edge--south-west,
-.resize-edge--north-west {
-  width: 12px;
-  height: 12px;
-}
-
-.resize-edge--north-east { top: 0; right: 0; cursor: nesw-resize; }
-.resize-edge--south-east { right: 0; bottom: 0; cursor: nwse-resize; }
-.resize-edge--south-west { bottom: 0; left: 0; cursor: nesw-resize; }
-.resize-edge--north-west { top: 0; left: 0; cursor: nwse-resize; }
 
 .window-actions {
   display: flex;
@@ -120,6 +102,7 @@ button { color: inherit; }
   gap: .375rem;
   padding-left: .25rem;
   white-space: nowrap;
+  cursor: move;
 }
 
 .app-name {
@@ -150,6 +133,11 @@ button { color: inherit; }
   flex: 1;
   align-self: stretch;
   cursor: move;
+}
+
+.window-brand,
+.drag-handle {
+  touch-action: none;
 }
 
 .header-actions {
@@ -255,8 +243,8 @@ select:focus-visible,
   font-size: .75rem;
   line-height: 1.2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .quota-card {
@@ -438,7 +426,7 @@ h1, h2 {
   height: 3px;
   flex: 0 0 3px;
   border-radius: 0;
-  background: #fffef8;
+  background: #b6bac2;
   box-shadow: 0 0 0 .5px rgb(9 9 11 / 85%), 0 0 1px rgb(0 0 0 / 70%);
 }
 
@@ -516,6 +504,10 @@ h1, h2 {
   padding-top: .375rem;
 }
 
+.app-shell[data-ultra-compact="true"] #weekly-card {
+  padding-bottom: 0;
+}
+
 .app-shell[data-ultra-compact="true"] .quota-heading h1,
 .app-shell[data-ultra-compact="true"] .quota-heading h2 {
   font-size: .8125rem;
@@ -539,16 +531,15 @@ h1, h2 {
 
 .app-shell[data-ultra-compact="true"] .quota-meter {
   height: .5rem;
-  margin: .3125rem 0 .1875rem;
+  margin: .375rem 0 .3125rem;
 }
 
 .app-shell[data-ultra-compact="true"] .quota-reset {
   min-height: .875rem;
-  overflow: hidden;
-  font-size: .6875rem;
+  overflow: visible;
+  font-size: .75rem;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .app-shell[data-ultra-compact="true"] .status-message {
@@ -989,3 +980,13 @@ h1, h2 {
     transition-duration: .01ms !important;
   }
 }
+
+.app-shell[data-view="settings"] .main-content { flex: 0 0 auto; overflow: visible; }
+.meter-bubble { display: none; position: absolute; bottom: 1px; width: 1.5px; height: 1.5px; border-radius: 50%; background: rgb(255 255 255 / 65%); pointer-events: none; }
+.quota-card[data-alert="critical"] .meter-bubble { display: block; animation: bubble-rise 8s linear infinite; }
+.meter-bubble:nth-child(1) { left: 14%; animation-delay: -1s; }
+.meter-bubble:nth-child(2) { left: 38%; animation-delay: -5s; }
+.meter-bubble:nth-child(3) { left: 63%; animation-delay: -3s; }
+.meter-bubble:nth-child(4) { left: 86%; animation-delay: -7s; }
+@keyframes bubble-rise { 0% { transform: translate(0, 3px); opacity: 0; } 25% { opacity: .65; } 80% { opacity: .4; } 100% { transform: translate(2px, -9px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .quota-card[data-alert="critical"] .meter-bubble { animation: none; opacity: .5; } }

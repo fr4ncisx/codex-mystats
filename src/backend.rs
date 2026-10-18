@@ -23,6 +23,7 @@ const RATE_LIMITS_RECONCILIATION_INTERVAL: Duration = Duration::from_secs(15);
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageState {
+    pub revision: u64,
     pub status: String,
     pub message: String,
     pub five_hour: Option<crate::protocol::UsageWindow>,
@@ -34,6 +35,7 @@ pub struct UsageState {
 impl Default for UsageState {
     fn default() -> Self {
         Self {
+            revision: 0,
             status: "connecting".into(),
             message: "Conectando con Codex…".into(),
             five_hour: None,
@@ -324,7 +326,10 @@ fn update_status(app: &AppHandle, state: &Arc<Mutex<UsageState>>, status: &str, 
 
 fn publish(app: &AppHandle, state: &Arc<Mutex<UsageState>>) {
     let snapshot = match state.lock() {
-        Ok(snapshot) => snapshot.clone(),
+        Ok(mut snapshot) => {
+            snapshot.revision = snapshot.revision.saturating_add(1);
+            snapshot.clone()
+        }
         Err(_) => return,
     };
     crate::update_tray_indicators(app, &snapshot);
@@ -831,6 +836,7 @@ mod tests {
     #[test]
     fn disconnected_state_marks_cached_values_stale() {
         let mut state = UsageState {
+            revision: 0,
             status: "online".into(),
             message: "ok".into(),
             five_hour: None,
@@ -852,6 +858,7 @@ mod tests {
     #[test]
     fn connecting_after_a_previous_read_is_marked_stale() {
         let mut state = UsageState {
+            revision: 0,
             status: "online".into(),
             message: "ok".into(),
             five_hour: None,
@@ -886,6 +893,7 @@ mod tests {
     #[test]
     fn malformed_notification_clears_cached_windows_until_full_read_succeeds() {
         let mut state = UsageState {
+            revision: 0,
             status: "online".into(),
             message: "ok".into(),
             five_hour: Some(crate::protocol::UsageWindow {

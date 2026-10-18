@@ -6,24 +6,19 @@
     <meta name="color-scheme" content="dark" />
     <title>Codex MyStats</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="./usage-colors.js" defer></script>
     <script src="./app.js" defer></script>
   </head>
   <body>
     <div class="app-shell" data-ultra-compact="false">
-      <span class="resize-edge resize-edge--north" data-resize-direction="North" aria-hidden="true"></span>
       <span class="resize-edge resize-edge--east" data-resize-direction="East" aria-hidden="true"></span>
-      <span class="resize-edge resize-edge--south" data-resize-direction="South" aria-hidden="true"></span>
       <span class="resize-edge resize-edge--west" data-resize-direction="West" aria-hidden="true"></span>
-      <span class="resize-edge resize-edge--north-east" data-resize-direction="NorthEast" aria-hidden="true"></span>
-      <span class="resize-edge resize-edge--south-east" data-resize-direction="SouthEast" aria-hidden="true"></span>
-      <span class="resize-edge resize-edge--south-west" data-resize-direction="SouthWest" aria-hidden="true"></span>
-      <span class="resize-edge resize-edge--north-west" data-resize-direction="NorthWest" aria-hidden="true"></span>
-      <header class="window-actions" data-tauri-drag-region>
-        <div class="window-brand" data-tauri-drag-region>
+      <header class="window-actions">
+        <div class="window-brand">
           <span class="app-name">Codex MyStats</span>
           <span class="version-badge" id="app-version-badge" aria-label="Loading version" data-i18n-aria="versionLoading">v…</span>
         </div>
-        <div class="drag-handle" data-tauri-drag-region aria-hidden="true"></div>
+        <div class="drag-handle" aria-hidden="true"></div>
         <nav class="header-actions" aria-label="Window actions" data-i18n-aria="windowActions">
           <button
             class="icon-button ultra-compact-toggle"
@@ -83,7 +78,7 @@
               aria-valuemax="100"
             >
               <div class="meter-track" aria-hidden="true">
-                <div class="meter-fill"></div>
+                <div class="meter-fill"><i class="meter-bubble"></i><i class="meter-bubble"></i><i class="meter-bubble"></i><i class="meter-bubble"></i></div>
               </div>
               <span class="threshold-marker" aria-hidden="true">
                 <i></i><i></i><i></i>
@@ -110,7 +105,7 @@
               aria-valuemax="100"
             >
               <div class="meter-track" aria-hidden="true">
-                <div class="meter-fill"></div>
+                <div class="meter-fill"><i class="meter-bubble"></i><i class="meter-bubble"></i><i class="meter-bubble"></i><i class="meter-bubble"></i></div>
               </div>
               <span class="threshold-marker" aria-hidden="true">
                 <i></i><i></i><i></i>
