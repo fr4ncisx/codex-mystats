@@ -32,9 +32,11 @@ A compact Windows panel for Codex CLI's five-hour and weekly usage windows.
 ## Features
 
 - Remaining usage and reset times for the five-hour and weekly windows.
-- Independent warning thresholds, starting at 20%.
+- Independent warning thresholds, starting at 20%. Bars turn orange five percentage points above each threshold, then red at the threshold, intensifying toward zero. Tiny bubbles appear in the red zone and respect reduced motion.
 - English by default, with Spanish available in Settings.
-- Adjustable interface scale, window pinning, and separate tray indicators.
+- Independently remembered normal and ultra-compact widths, with fixed panel heights and Settings sized to its visible content.
+- Two tray indicators with matching threshold-aware colors; clicking either restores the full window. Tooltips show remaining usage and reset times.
+- Drag the panel from its name or open header space, including in ultra-compact mode.
 - One running instance; launching it again restores the open panel.
 
 ---
