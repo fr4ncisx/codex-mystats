@@ -5,6 +5,9 @@ const { test, expect, installTauriMock, usageState, appVersion } = require("./fi
 const previewDirectory = path.resolve("artifacts/ui-previews");
 
 async function verifyVisibleLayout(page, expectedSize) {
+  await expect(page.locator("#dashboard-view")).toBeVisible();
+  await expect(page.locator(".app-shell")).not.toHaveAttribute("data-mode-transition", "true");
+  await expect.poll(() => page.evaluate(() => ({ width: innerWidth, height: innerHeight }))).toEqual(expectedSize);
   const isCompact = expectedSize.height === 156;
   if (isCompact) {
     await expect.poll(() => page.locator("#five-hour-title").evaluate((node) => getComputedStyle(node).fontSize))
@@ -541,12 +544,15 @@ test("supports keyboard navigation and localized quota labels", async ({ page })
   await page.getByRole("button", { name: "Settings" }).click();
   const generalTab = page.getByRole("tab", { name: "General" });
   const limitsTab = page.getByRole("tab", { name: "Limits" });
+  await expect(page.locator(".app-shell")).not.toHaveAttribute("data-mode-transition", "true");
   await generalTab.focus();
   await page.keyboard.press("ArrowRight");
   await expect(limitsTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".app-shell")).not.toHaveAttribute("data-mode-transition", "true");
   await expect(limitsTab).toBeFocused();
   await page.keyboard.press("Home");
   await expect(generalTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".app-shell")).not.toHaveAttribute("data-mode-transition", "true");
   await expect(generalTab).toBeFocused();
 
   await page.getByRole("button", { name: "Español" }).click();

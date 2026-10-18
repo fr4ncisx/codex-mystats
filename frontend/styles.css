@@ -60,7 +60,7 @@ button { color: inherit; }
 
 .app-shell[data-mode-transition="true"] .window-actions,
 .app-shell[data-mode-transition="true"] .main-content {
-  visibility: hidden;
+  opacity: 0;
   pointer-events: none;
 }
 
