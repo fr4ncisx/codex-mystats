@@ -16,7 +16,7 @@ module.exports = defineConfig({
   use: {
     browserName: "chromium",
     baseURL: "http://127.0.0.1:4173",
-    viewport: { width: 360, height: 230 },
+    viewport: { width: 360, height: 220 },
     deviceScaleFactor: 1,
     colorScheme: "dark",
     locale: "en-US",

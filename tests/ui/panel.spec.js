@@ -5,7 +5,8 @@ const { test, expect, installTauriMock, usageState, appVersion } = require("./fi
 const previewDirectory = path.resolve("artifacts/ui-previews");
 
 async function verifyVisibleLayout(page, expectedSize) {
-  if (expectedSize.width === 300) {
+  const isCompact = expectedSize.height === 156;
+  if (isCompact) {
     await expect.poll(() => page.locator("#five-hour-title").evaluate((node) => getComputedStyle(node).fontSize))
       .toBe("13px");
   }
@@ -55,8 +56,8 @@ async function verifyVisibleLayout(page, expectedSize) {
     };
   });
   expect(layout.viewport).toEqual(expectedSize);
-  expect(layout.ultraCompact).toBe(expectedSize.width === 300 ? "true" : "false");
-  if (expectedSize.width === 300) expect(layout.titleFontSize, JSON.stringify(layout)).toBe("13px");
+  expect(layout.ultraCompact).toBe(isCompact ? "true" : "false");
+  if (isCompact) expect(layout.titleFontSize, JSON.stringify(layout)).toBe("13px");
   expect(layout.shell.width).toBe(expectedSize.width);
   expect(layout.shell.height).toBe(expectedSize.height);
   expect(layout.document.width).toBeLessThanOrEqual(expectedSize.width);
@@ -77,7 +78,7 @@ async function verifyVisibleLayout(page, expectedSize) {
     }
     expect(card.segments[1].top - card.segments[0].bottom).toBe(2);
     expect(card.segments[2].top - card.segments[1].bottom).toBe(2);
-    if (expectedSize.width === 300) {
+    if (isCompact) {
       expect(card.percent.right).toBeLessThanOrEqual(card.remaining.left + 0.5);
     }
   }
@@ -140,17 +141,69 @@ async function verifyCloseDialogLayout(page) {
   }
 }
 
-test("renders the normal panel at 360 by 230 without overflow", async ({ page }) => {
+test("renders the normal panel at 360 by 220 without overflow or excess bottom space", async ({ page }) => {
   await page.clock.setFixedTime(new Date("2026-10-14T15:00:00.000Z"));
   await installTauriMock(page, {});
 
   await expect(page.locator("#app-version-badge")).toHaveText(`v${appVersion}`);
+  expect(await page.evaluate(() => window.__mockPanelStateAtShow)).toEqual({
+    ultraCompact: "false",
+    viewport: { width: 360, height: 220 },
+    settingsLoaded: true,
+  });
   expect(await commandCalls(page, "get_app_version")).toHaveLength(1);
   await expect(page.locator(".app-name")).toHaveText("Codex MyStats");
   await expect(page.locator("#five-hour-percent")).toHaveText("72%");
   await expect(page.locator("#weekly-percent")).toHaveText("64%");
-  const layout = await verifyVisibleLayout(page, { width: 360, height: 230 });
+  const layout = await verifyVisibleLayout(page, { width: 360, height: 220 });
   expect(layout.cards[0].remaining.top).toBeGreaterThanOrEqual(layout.cards[0].percent.top);
+  expect(layout.shell.bottom - layout.cards[1].reset.bottom).toBeLessThanOrEqual(8);
+});
+
+test("waits for compact preferences and the DPI-scaled native size before showing the panel", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-10-14T15:00:00.000Z"));
+  await installTauriMock(page, {
+    settings: { ultraCompact: true, language: "es" },
+    settingsLoadDelayMs: 120,
+    scaleFactor: 1.5,
+  });
+
+  expect(await page.evaluate(() => window.__mockPanelStateAtShow)).toEqual({
+    ultraCompact: "true",
+    viewport: { width: 300, height: 156 },
+    settingsLoaded: true,
+  });
+  expect(await page.evaluate(() => window.__mockWindowResizeEvents.at(-1))).toEqual({
+    width: 450,
+    height: 234,
+  });
+  const layout = await verifyVisibleLayout(page, { width: 300, height: 156 });
+  expect(layout.cards[1].reset.bottom).toBeLessThanOrEqual(layout.shell.bottom);
+  await expect(page.locator("#weekly-reset")).toContainText("Se restablece");
+  await expect(page.locator("#weekly-reset")).toHaveCSS("text-overflow", "clip");
+});
+
+test("only exposes horizontal window resize edges", async ({ page }) => {
+  await installTauriMock(page, {});
+  const resizeDirections = await page.locator("[data-resize-direction]").evaluateAll((edges) =>
+    edges.map((edge) => edge.dataset.resizeDirection).sort(),
+  );
+  expect(resizeDirections).toEqual(["East", "West"]);
+
+  await page.getByRole("button", { name: "Turn on ultra-compact mode" }).click();
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
+  await expect(page.locator("[data-resize-direction]")).toHaveCount(2);
+  await verifyVisibleLayout(page, { width: 300, height: 156 });
+});
+
+test("keeps the normal layout complete at minimum and expanded widths", async ({ page }) => {
+  await installTauriMock(page, {});
+
+  for (const width of [320, 520]) {
+    await page.setViewportSize({ width, height: 220 });
+    const layout = await verifyVisibleLayout(page, { width, height: 220 });
+    expect(layout.shell.bottom - layout.cards[1].reset.bottom).toBeLessThanOrEqual(8);
+  }
 });
 
 test("edits whole-number thresholds and applies marker positions immediately", async ({ page }) => {
@@ -165,7 +218,7 @@ test("edits whole-number thresholds and applies marker positions immediately", a
     .toContain('"threshold5h":42');
 
   await page.getByRole("button", { name: "Back" }).click();
-  const layout = await verifyVisibleLayout(page, { width: 360, height: 230 });
+  const layout = await verifyVisibleLayout(page, { width: 360, height: 220 });
   expect(layout.cards[0].expectedMarkerCenter).toBeCloseTo(
     layout.cards[0].meterLeft + layout.cards[0].meterWidth * 0.42,
     2,
@@ -243,15 +296,42 @@ test("renders ultracompact panel at 300 by 156 with inline remaining labels", as
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
   await expect(page.locator("#app-version-badge")).toHaveText(`v${appVersion}`);
   await expect(page.locator("#always-on-top-button")).toHaveCount(0);
-  await page.setViewportSize({ width: 300, height: 156 });
   const layout = await verifyVisibleLayout(page, { width: 300, height: 156 });
   await expect.poll(async () => page.locator("#weekly-title").evaluate((node) => getComputedStyle(node).fontSize))
     .toBe("13px");
-  expect(layout.shell.bottom - layout.cards[1].cardBottom).toBeLessThanOrEqual(9);
+  expect(layout.shell.bottom - layout.cards[1].reset.bottom).toBeLessThanOrEqual(8);
   for (const card of layout.cards) {
     expect(Math.abs(card.percent.top - card.remaining.top)).toBeLessThanOrEqual(2);
     expect(card.percent.left).toBeLessThan(card.remaining.left);
   }
+});
+
+test("keeps ultracompact height fixed while allowing horizontal resizing", async ({ page }) => {
+  await installTauriMock(page, {
+    settings: { ultraCompact: true, threshold5h: 33, thresholdWeekly: 67 },
+  });
+  await page.setViewportSize({ width: 480, height: 156 });
+
+  const layout = await page.evaluate(() => {
+    const shell = document.querySelector(".app-shell").getBoundingClientRect();
+    const title = document.querySelector("#five-hour-title");
+    const meter = document.querySelector("#five-hour-progress").getBoundingClientRect();
+    return {
+      shellWidth: shell.width,
+      shellHeight: shell.height,
+      documentWidth: document.documentElement.scrollWidth,
+      documentHeight: document.documentElement.scrollHeight,
+      titleFontSize: getComputedStyle(title).fontSize,
+      meterWidth: meter.width,
+    };
+  });
+
+  expect(layout.shellWidth).toBe(480);
+  expect(layout.shellHeight).toBe(156);
+  expect(layout.documentWidth).toBeLessThanOrEqual(480);
+  expect(layout.documentHeight).toBeLessThanOrEqual(156);
+  expect(layout.titleFontSize).toBe("13px");
+  expect(layout.meterWidth).toBeGreaterThan(400);
 });
 
 test("captures deterministic normal and ultracompact panels", async ({ page }) => {
@@ -267,7 +347,6 @@ test("captures deterministic normal and ultracompact panels", async ({ page }) =
 
   await page.locator("#ultra-compact-button").click();
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
-  await page.setViewportSize({ width: 300, height: 156 });
   await expect.poll(async () => page.locator("#five-hour-title").evaluate((node) => getComputedStyle(node).fontSize))
     .toBe("13px");
   await verifyVisibleLayout(page, { width: 300, height: 156 });
@@ -279,7 +358,7 @@ test("captures deterministic normal and ultracompact panels", async ({ page }) =
 });
 
 test("uses ten heat color steps at each 10-point boundary", async ({ page }) => {
-  await installTauriMock(page, {});
+  await installTauriMock(page, { settings: { threshold5h: 0, thresholdWeekly: 0 } });
   // Measure the rendered target width, not the intermediate frames of the UI transition.
   await page.addStyleTag({ content: ".meter-fill { transition: none !important; }" });
   const palette = {
@@ -301,14 +380,13 @@ test("uses ten heat color steps at each 10-point boundary", async ({ page }) => 
   }
   cases.push([100, "step-9"]);
   const modes = [
-    { compact: false, size: { width: 360, height: 230 } },
+    { compact: false, size: { width: 360, height: 220 } },
     { compact: true, size: { width: 300, height: 156 } },
   ];
   for (const mode of modes) {
     if (mode.compact) {
       await page.getByRole("button", { name: "Turn on ultra-compact mode" }).click();
       await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
-      await page.setViewportSize(mode.size);
     }
 
     await verifyVisibleLayout(page, mode.size);
@@ -334,7 +412,8 @@ test("uses ten heat color steps at each 10-point boundary", async ({ page }) => 
       for (const selector of ["#five-hour-progress", "#weekly-progress"]) {
         const meter = page.locator(selector);
         await expect(meter).toHaveAttribute("data-heat", heat);
-        const mid = palette[heat][1];
+        const expectedPalette = remaining === 0 ? ["#a8192d", "#ff3048", "#ff7785"] : palette[heat];
+        const mid = expectedPalette[1];
         const [red, green, blue] = mid.match(/[\da-f]{2}/gi).map((channel) => Number.parseInt(channel, 16));
         const expectedTextColor = `rgb(${red}, ${green}, ${blue})`;
         await expect.poll(() => meter.evaluate((node) => {
@@ -357,7 +436,7 @@ test("uses ten heat color steps at each 10-point boundary", async ({ page }) => 
           };
         });
         expect(actual.cardHeat).toBe(heat);
-        expect(actual.colors).toEqual(palette[heat]);
+        expect(actual.colors).toEqual(expectedPalette);
         expect(actual.percentageColor, JSON.stringify(actual)).toBe(expectedTextColor);
         expect(actual.value).toBeCloseTo(remaining, 2);
         expect(Math.abs(actual.fillRatio - remaining)).toBeLessThanOrEqual(0.1);
@@ -404,8 +483,8 @@ test("renders quota events immediately, keeps source precision, and recovers fro
   await expect(page.locator("#connection-message")).toBeHidden();
 
   await page.evaluate((state) => window.__mockEmitUsage({ ...state, status: "reconnecting" }), updated);
-  await expect(page.locator("#connection-message")).toHaveText("Reconnecting. Limits are temporarily unavailable.");
-  await expectLimitsUnavailable(page, { width: 360, height: 230 });
+  await expect(page.locator("#connection-message")).toHaveText("Reconnecting. Limits unavailable.");
+  await expectLimitsUnavailable(page, { width: 360, height: 220 });
 
   await page.evaluate((state) => window.__mockEmitUsage(state), usageState(18, 12, "online"));
   await expect(page.locator("#five-hour-percent")).toHaveText("18%");
@@ -478,6 +557,7 @@ test("supports keyboard navigation and localized quota labels", async ({ page })
   );
   await expect(page.locator("#five-hour-reset")).toContainText("Se restablece");
   await expect(page.locator("#weekly-percent")).toHaveText("64 %");
+  await verifyVisibleLayout(page, { width: 360, height: 220 });
 
   await page.getByRole("button", { name: "Configuración" }).click();
   await page.getByRole("button", { name: "English" }).click();
@@ -491,13 +571,50 @@ test("supports keyboard navigation and localized quota labels", async ({ page })
   await expect(page.locator("#weekly-percent")).toHaveText("64%");
 });
 
+test("opens settings from persisted ultracompact mode and returns without blocking", async ({ page }) => {
+  await installTauriMock(page, {
+    settings: { ultraCompact: true, threshold5h: 33, thresholdWeekly: 67 },
+  });
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("#settings-panel")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "General" })).toBeFocused();
+  await expect.poll(async () => (await commandCalls(page, "set_ultra_compact")).length).toBe(2);
+
+  const settingsBounds = await page.locator("#settings-panel").evaluate((panel) => {
+    const bounds = panel.getBoundingClientRect();
+    return {
+      right: bounds.right,
+      bottom: bounds.bottom,
+      viewportWidth: document.documentElement.scrollWidth,
+      viewportHeight: document.documentElement.scrollHeight,
+    };
+  });
+  expect(settingsBounds.right).toBeLessThanOrEqual(360);
+  expect(settingsBounds.bottom).toBeLessThanOrEqual(220);
+  expect(settingsBounds.viewportWidth).toBeLessThanOrEqual(360);
+  expect(settingsBounds.viewportHeight).toBeLessThanOrEqual(220);
+
+  await page.getByRole("tab", { name: "Limits" }).click();
+  await expect(page.locator("#limits-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.locator("#settings-panel")).toBeHidden();
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
+  await expect.poll(async () => (await commandCalls(page, "set_ultra_compact")).length).toBe(3);
+  await verifyVisibleLayout(page, { width: 300, height: 156 });
+});
+
 test("toggles ultracompact mode, expands settings temporarily, and restores it", async ({ page }) => {
   await installTauriMock(page, {});
   const compactButton = page.getByRole("button", { name: "Turn on ultra-compact mode" });
   await compactButton.click();
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
-  await expect.poll(async () => (await commandCalls(page, "set_ultra_compact")).length).toBe(1);
-  await page.setViewportSize({ width: 300, height: 156 });
+  await expect.poll(async () => (await commandCalls(page, "set_ultra_compact")).length).toBe(2);
+  expect(await commandCalls(page, "set_ultra_compact")).toEqual([
+    { command: "set_ultra_compact", args: { ultraCompact: false } },
+    { command: "set_ultra_compact", args: { ultraCompact: true, preferredUltraCompact: true } },
+  ]);
   await expect.poll(async () => page.locator("#five-hour-title").evaluate((node) => getComputedStyle(node).fontSize))
     .toBe("13px");
   await verifyVisibleLayout(page, { width: 300, height: 156 });
@@ -505,7 +622,6 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
     .toContain('"ultraCompact":true');
   await page.reload();
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
-  await page.setViewportSize({ width: 300, height: 156 });
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("#settings-panel")).toBeVisible();
@@ -514,7 +630,6 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
     { command: "set_ultra_compact", args: { ultraCompact: true } },
     { command: "set_ultra_compact", args: { ultraCompact: false } },
   ]);
-  await page.setViewportSize({ width: 360, height: 230 });
 
   await page.getByRole("tab", { name: "Limits" }).click();
   await expect(page.locator("#limits-panel")).toBeVisible();
@@ -538,7 +653,6 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
   await page.getByRole("button", { name: "Volver" }).click();
   await expect(page.locator("#settings-panel")).toBeHidden();
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
-  await page.setViewportSize({ width: 300, height: 156 });
   await verifyVisibleLayout(page, { width: 300, height: 156 });
 
   await page.getByRole("button", { name: "Minimizar" }).click();
@@ -556,9 +670,26 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
   await expect.poll(async () => (await commandCalls(page, "quit_app")).length).toBe(1);
 });
 
+test("persists the selected compact mode in the native resize operation", async ({ page }) => {
+  await installTauriMock(page, { failures: ["save_settings"] });
+  await page.getByRole("button", { name: "Turn on ultra-compact mode" }).click();
+
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
+  await expect.poll(async () => (await commandCalls(page, "set_ultra_compact")).length).toBe(2);
+  expect(await commandCalls(page, "set_ultra_compact")).toEqual([
+    { command: "set_ultra_compact", args: { ultraCompact: false } },
+    { command: "set_ultra_compact", args: { ultraCompact: true, preferredUltraCompact: true } },
+  ]);
+  await expect.poll(async () => page.evaluate(() => window.__mockGetSettings().ultraCompact)).toBe(true);
+  expect(await commandCalls(page, "save_settings")).toHaveLength(0);
+
+  await page.reload();
+
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
+});
+
 test("keeps every compact close action visible together when saving the choice fails", async ({ page }) => {
   await installTauriMock(page, { settings: { ultraCompact: true }, failures: ["save_settings"] });
-  await page.setViewportSize({ width: 300, height: 156 });
   await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("checkbox", { name: "Remember my choice" }).check();
   await page.getByRole("button", { name: "Minimize in the tray" }).click();
@@ -603,6 +734,32 @@ test("remembers the close action across restart and can restore asking each time
   await page.reload();
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+});
+
+test("applies the remembered close action when the native window close event fires", async ({ page }) => {
+  await installTauriMock(page, {});
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("checkbox", { name: "Remember my choice" }).check();
+  await page.getByRole("button", { name: "Minimize in the tray" }).click();
+  await expect.poll(async () => (await commandCalls(page, "minimize_panel")).length).toBe(1);
+
+  await page.evaluate(() => window.__mockEmitCloseRequested());
+
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect.poll(async () => (await commandCalls(page, "minimize_panel")).length).toBe(2);
+});
+
+test("waits for the saved close choice before handling an early close", async ({ page }) => {
+  await installTauriMock(page, {
+    settings: { closeAction: "minimize" },
+    settingsLoadDelayMs: 250,
+    waitForInitialization: false,
+  });
+
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect.poll(async () => (await commandCalls(page, "minimize_panel")).length).toBe(1);
 });
 
 test("does not minimize or quit when remembering a close choice fails to save", async ({ page }) => {
@@ -650,19 +807,19 @@ test("hides cached percentages whenever limits are unavailable in both layouts",
   await expect(page.locator("#weekly-percent")).toHaveText("69%");
   await page.evaluate((state) => window.__mockEmitUsage(state), usageState(61, 69, "stale"));
   await expect(page.locator("#connection-message")).toHaveText("Could not update usage limits.");
-  await expectLimitsUnavailable(page, { width: 360, height: 230 });
+  await expectLimitsUnavailable(page, { width: 360, height: 220 });
   for (const status of unavailableStatuses) {
     await page.evaluate((value) => window.__mockEmitUsage({
       ...window.__mockCurrentUsage,
       status: value,
     }), status);
-    await expectLimitsUnavailable(page, { width: 360, height: 230 });
+    await expectLimitsUnavailable(page, { width: 360, height: 220 });
   }
   await page.evaluate(() => window.__mockEmitUsage({
     ...window.__mockCurrentUsage,
     status: "stale",
   }));
-  await expectLimitsUnavailable(page, { width: 360, height: 230 });
+  await expectLimitsUnavailable(page, { width: 360, height: 220 });
   const unavailableColors = await page.locator("#five-hour-progress").evaluate((meter) => {
     const style = getComputedStyle(meter);
     return ["--water-deep", "--water-mid", "--water-light"]
@@ -679,7 +836,6 @@ test("hides cached percentages whenever limits are unavailable in both layouts",
 
   await page.locator("#ultra-compact-button").click();
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
-  await page.setViewportSize({ width: 300, height: 156 });
   await expectLimitsUnavailable(page, { width: 300, height: 156 });
   await page.locator(".app-shell").screenshot({
     path: path.join(previewDirectory, "unavailable-limits-ultracompact.png"),
@@ -744,24 +900,18 @@ test("keeps the build version visible when startup cannot read usage", async ({ 
   await expect(page.locator("#weekly-percent")).toHaveText("—");
 });
 
-test("hides an early cached usage event when the startup read fails", async ({ page }) => {
-  await installTauriMock(page, {
-    usageFailure: true,
-    usageEventOnListen: usageState(61, 69, "online"),
-  });
-
-  await expect(page.locator("#connection-message")).toHaveText("Could not retrieve usage limits.");
-  await expectLimitsUnavailable(page, { width: 360, height: 230 });
+test("preserves a fresh event if the initial usage request fails", async ({ page }) => {
+  await installTauriMock(page, { usageFailure: true, usageEventOnListen: usageState(61, 69, "online") });
+  await expect(page.locator("#connection-message")).toBeHidden();
+  await expect(page.locator("#five-hour-percent")).toHaveText("61%");
+  await expect(page.locator("#weekly-percent")).toHaveText("69%");
 });
 
-test("shows a disconnected state when event subscription fails during startup", async ({ page }) => {
+test("keeps a valid snapshot while reporting an unavailable event subscription", async ({ page }) => {
   await installTauriMock(page, { listenFailure: true });
-  await expect(page.locator("#connection-message")).toHaveText("Could not retrieve usage limits.");
-  await expect(page.locator("#app-version-badge")).toHaveText(`v${appVersion}`);
-  await expect(page.locator("#five-hour-percent")).toHaveText("—");
-  await expect(page.locator("#weekly-percent")).toHaveText("—");
-  await expect(page.locator("#five-hour-card")).toHaveClass(/quota--unavailable/);
-  await expect(page.locator("#weekly-card")).toHaveClass(/quota--unavailable/);
+  await expect(page.locator("#connection-message")).toHaveText("Could not subscribe to usage updates.");
+  await expect(page.locator("#five-hour-percent")).toHaveText("72%");
+  await expect(page.locator("#weekly-percent")).toHaveText("64%");
 });
 
 test("keeps the version badge visible if version lookup fails", async ({ page }) => {
@@ -788,4 +938,168 @@ test("reports failure to resize without persisting compact mode", async ({ page 
   await expect(page.locator("#connection-message")).toHaveText("Could not change the window size.");
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "false");
   await expect(page.locator("#ultra-compact-button")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("keeps the old layout and preference when the native resize is not confirmed", async ({ page }) => {
+  await installTauriMock(page, { resizeFailure: true });
+  await page.getByRole("button", { name: "Turn on ultra-compact mode" }).click();
+
+  await expect(page.locator("#connection-message")).toHaveText("Could not change the window size.");
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "false");
+  await expect(page.locator("#ultra-compact-button")).toHaveAttribute("aria-pressed", "false");
+  expect(await page.evaluate(() => ({ width: innerWidth, height: innerHeight })))
+    .toEqual({ width: 360, height: 220 });
+  await expect.poll(async () => page.evaluate(() => window.__mockGetSettings().ultraCompact)).toBe(false);
+  await verifyVisibleLayout(page, { width: 360, height: 220 });
+});
+
+test("starts native dragging from the app name and open header space, never from controls", async ({ page }) => {
+  await installTauriMock(page, {});
+  await page.locator(".app-name").dispatchEvent("pointerdown", { button: 0 });
+  await page.locator(".drag-handle").dispatchEvent("pointerdown", { button: 0 });
+  await page.locator("#settings-button").dispatchEvent("pointerdown", { button: 0 });
+
+  await expect.poll(async () => page.evaluate(() => window.__mockDragCalls.length)).toBe(2);
+  expect(await page.evaluate(() => window.__mockDragCalls)).toEqual(["start", "start"]);
+});
+
+async function verifySettingsContent(page) {
+  await expect.poll(() => page.locator(".app-shell").getAttribute("data-mode-transition")).toBeNull();
+  const bounds = await page.locator("#settings-panel").evaluate((panel) => {
+    const nodes = [...panel.querySelectorAll("button, input, label, legend, .setting-label, #remembered-close-text, .save-message")]
+      .filter((node) => node.getClientRects().length > 0);
+    return {
+      width: innerWidth, height: innerHeight,
+      scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight,
+      nodes: nodes.map((node) => { const r = node.getBoundingClientRect(); return { text: node.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }; }),
+      bottom: panel.getBoundingClientRect().bottom,
+    };
+  });
+  expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.width);
+  expect(bounds.scrollHeight).toBeLessThanOrEqual(bounds.height);
+  for (const node of bounds.nodes) {
+    expect(node.left, JSON.stringify(node)).toBeGreaterThanOrEqual(0);
+    expect(node.right, JSON.stringify(node)).toBeLessThanOrEqual(bounds.width);
+    expect(node.bottom, JSON.stringify(node)).toBeLessThanOrEqual(bounds.height);
+  }
+  expect(bounds.height - bounds.bottom).toBeLessThanOrEqual(8);
+  return bounds;
+}
+
+for (const compact of [false, true]) {
+  for (const language of ["en", "es"]) {
+    test(`fits all Settings controls and errors from ${compact ? "compact" : "normal"} in ${language}`, async ({ page }) => {
+      await installTauriMock(page, { settings: { ultraCompact: compact, language, closeAction: "minimize" } });
+      await page.locator("#settings-button").click();
+      await verifySettingsContent(page);
+      await expect(page.locator("#remembered-close-text")).toBeVisible();
+      if (compact && language === "en") await page.screenshot({ path: path.join(previewDirectory, "settings-general.png"), animations: "disabled" });
+      await page.locator("#limits-tab").click();
+      await verifySettingsContent(page);
+      await page.locator("#threshold-5h-value").fill("101");
+      await page.locator("#threshold-5h-value").blur();
+      await expect(page.locator("#limits-panel .save-message")).toBeVisible();
+      await verifySettingsContent(page);
+      await page.locator("#settings-button").click();
+      await verifyVisibleLayout(page, compact ? { width: 300, height: 156 } : { width: 360, height: 220 });
+    });
+  }
+}
+
+const alertCases = require("../usage-color-cases.json");
+for (const threshold of [0, 20, 50, 100]) {
+  test(`matches native alert colors and bubble boundaries at threshold ${threshold}`, async ({ page }) => {
+    await installTauriMock(page, { settings: { threshold5h: threshold, thresholdWeekly: threshold } });
+    await page.addStyleTag({ content: ".meter-fill { transition: none !important; }" });
+    for (const compact of [false, true]) {
+      if (compact) await page.locator("#ultra-compact-button").click();
+      for (const sample of alertCases.filter((sample) => sample.threshold === threshold)) {
+        await page.evaluate((state) => window.__mockEmitUsage(state), usageState(sample.remaining, sample.remaining));
+        for (const selector of ["#five-hour", "#weekly"]) {
+          const card = page.locator(`${selector}-card`);
+          await expect(card).toHaveAttribute("data-alert", sample.alert);
+          await expect(page.locator(`${selector}-percent`)).toHaveCSS("color", `rgb(${sample.mid.join(", ")})`);
+          const result = await card.evaluate((node) => ({
+            mid: getComputedStyle(node).getPropertyValue("--water-mid").trim(),
+            bubbles: [...node.querySelectorAll(".meter-bubble")].map((bubble) => getComputedStyle(bubble).display),
+            fillWidth: node.querySelector(".meter-fill").getBoundingClientRect().width,
+            clip: getComputedStyle(node.querySelector(".meter-fill")).overflow,
+            marker: getComputedStyle(node.querySelector(".threshold-marker i")).backgroundColor,
+          }));
+          expect(result.mid).toBe("#" + sample.mid.map((channel) => channel.toString(16).padStart(2, "0")).join(""));
+          expect(result.bubbles).toEqual(Array(4).fill(sample.alert === "critical" ? "block" : "none"));
+          expect(result.clip).toBe("hidden");
+          expect(result.marker).toBe("rgb(182, 186, 194)");
+          if (sample.remaining === 0) expect(result.fillWidth).toBe(0);
+        }
+      }
+    }
+  });
+}
+
+test("uses independent threshold colors and respects reduced motion", async ({ page }) => {
+  await installTauriMock(page, { settings: { threshold5h: 20, thresholdWeekly: 50 }, usageState: usageState(25, 25) });
+  await expect(page.locator("#five-hour-percent")).toHaveCSS("color", "rgb(220, 112, 64)");
+  await expect(page.locator("#weekly-percent")).toHaveCSS("color", "rgb(242, 66, 78)");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(page.locator("#weekly-card .meter-bubble").first()).toHaveCSS("animation-name", "bubble-rise");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(page.locator("#weekly-card .meter-bubble").first()).toHaveCSS("animation-name", "none");
+  await page.screenshot({ path: path.join(previewDirectory, "threshold-alerts.png"), animations: "disabled" });
+});
+
+test("ignores an older startup response and older events after a newer event", async ({ page }) => {
+  await installTauriMock(page, { usageReadDelayMs: 300, waitForInitialization: false });
+  await expect.poll(() => commandCalls(page, "get_usage_state")).not.toHaveLength(0);
+  await page.evaluate((state) => window.__mockEmitUsage({ ...state, revision: 10 }), usageState(31, 82));
+  await page.waitForFunction(() => window.__mockPanelShown);
+  await expect(page.locator("#five-hour-percent")).toHaveText("31%");
+  await page.evaluate((state) => window.__mockEmitUsage({ ...state, revision: 2 }), usageState(61, 69));
+  await expect(page.locator("#five-hour-percent")).toHaveText("31%");
+});
+
+test("a native initialization failure preserves valid usage and the saved close choice", async ({ page }) => {
+  await installTauriMock(page, { settings: { closeAction: "minimize" }, failures: ["get_native_window_mode"] });
+  await expect(page.locator("#connection-message")).toHaveText("Could not change the window size.");
+  await expect(page.locator("#five-hour-percent")).toHaveText("72%");
+  await page.locator("#close-button").click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect.poll(() => commandCalls(page, "minimize_panel")).toHaveLength(1);
+});
+
+test("preferences load failure keeps fresh usage and reports the correct cause", async ({ page }) => {
+  await installTauriMock(page, { loadFailure: true });
+  await expect(page.locator("#connection-message")).toHaveText("Could not load preferences.");
+  await expect(page.locator("#five-hour-percent")).toHaveText("72%");
+  await expect(page.locator("#weekly-percent")).toHaveText("64%");
+});
+
+test("pending preference saves cannot overwrite a remembered close action", async ({ page }) => {
+  await installTauriMock(page, { saveDelayMs: 150 });
+  await page.locator("#settings-button").click();
+  await page.locator("#language-es").click();
+  await expect.poll(() => commandCalls(page, "save_settings")).not.toHaveLength(0);
+  await page.locator("#close-button").click();
+  await page.locator("#remember-close-choice").check();
+  await page.locator("#minimize-close-button").click();
+  await expect.poll(() => commandCalls(page, "minimize_panel")).toHaveLength(1);
+  await page.evaluate(() => window.__mockEmitRestored());
+  await page.locator("#close-button").click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect.poll(() => commandCalls(page, "minimize_panel")).toHaveLength(2);
+  await page.reload();
+  await page.waitForFunction(() => window.__mockPanelShown);
+  await page.locator("#close-button").click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect.poll(() => commandCalls(page, "minimize_panel")).toHaveLength(1);
+  expect(await page.evaluate(() => window.__mockGetSettings())).toMatchObject({ language: "es", closeAction: "minimize" });
+});
+
+test("restoring the main panel resynchronizes usage without removing its controls", async ({ page }) => {
+  await installTauriMock(page, {});
+  await page.locator("#minimize-button").click();
+  await page.evaluate(() => { window.__mockCurrentUsage.status = "stale"; window.__mockCurrentUsage.revision += 1; window.__mockEmitRestored(); });
+  await expect(page.locator("#five-hour-percent")).toHaveText("—");
+  for (const name of ["Settings", "Minimize", "Close", "Turn on ultra-compact mode"]) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
+  await expect(page.locator("[data-resize-direction]")).toHaveCount(2);
 });

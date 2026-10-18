@@ -54,7 +54,17 @@ function usageState(remaining5h = 72, remainingWeekly = 64, status = "online") {
   };
 }
 
-async function installTauriMock(page, options = {}) {
+async function installTauriMock(page, options = {}, route = "/") {
+  const initialMode = options.settings?.ultraCompact === true;
+  const initialSize = initialMode
+    ? options.settings?.ultraCompactWindowSize ?? { width: 300, height: 156 }
+    : options.settings?.normalWindowSize ?? { width: 360, height: 220 };
+  await page.setViewportSize(route.endsWith("/tray.html")
+    ? { width: 320, height: 128 }
+    : initialSize);
+  await page.exposeFunction("__mockResizeNativeWindow", async (size) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+  });
   await page.addInitScript((config) => {
     const defaults = {
       threshold5h: 20,
@@ -64,6 +74,8 @@ async function installTauriMock(page, options = {}) {
       closeAction: "ask",
       language: "en",
       ultraCompact: false,
+      normalWindowSize: { width: 360, height: 220 },
+      ultraCompactWindowSize: { width: 300, height: 156 },
     };
     let settings;
     try {
@@ -73,7 +85,7 @@ async function installTauriMock(page, options = {}) {
     }
     if (!settings || typeof settings !== "object") {
       settings = config.settings && typeof config.settings === "object"
-        ? { ...config.settings }
+        ? { ...defaults, ...config.settings }
         : { ...defaults };
     }
     let currentUsage = config.usageState ?? {
@@ -93,18 +105,41 @@ async function installTauriMock(page, options = {}) {
         resetsAt: 1_792_000_000,
       },
     };
+    let usageRevision = currentUsage.revision ?? 1;
+    currentUsage = { ...currentUsage, revision: usageRevision };
     const listeners = new Map();
+    const resizeListeners = new Set();
     const calls = [];
     const failures = new Set(config.failures ?? []);
+    const scaleFactor = Number.isFinite(config.scaleFactor) && config.scaleFactor > 0
+      ? config.scaleFactor
+      : 1;
+    let nativeUltraCompact = settings.ultraCompact === true;
+    let settingsLoaded = false;
+    let skipNativeResize = config.resizeFailure === true;
 
     window.__mockCalls = calls;
     window.__mockFailures = failures;
     window.__mockCurrentUsage = currentUsage;
     window.__mockGetSettings = () => ({ ...settings });
+    window.__mockTooltipValues = [];
+    window.__mockDragCalls = [];
+    window.__mockPanelShown = false;
+    window.__mockPanelStateAtShow = null;
+    window.__mockWindowResizeEvents = [];
+    window.__mockEmitPreferences = (payload) => {
+      settings = { ...settings, ...payload };
+      for (const listener of listeners.get("preferences-updated") ?? []) listener({ payload });
+    };
     window.__mockEmitUsage = (payload) => {
-      currentUsage = payload;
-      window.__mockCurrentUsage = payload;
-      for (const listener of listeners.get("usage-state") ?? []) listener({ payload });
+      usageRevision = payload.revision ?? usageRevision + 1;
+      currentUsage = { ...payload, revision: usageRevision };
+      window.__mockCurrentUsage = currentUsage;
+      for (const listener of listeners.get("usage-state") ?? []) listener({ payload: currentUsage });
+    };
+    window.__mockEmitRestored = () => { for (const listener of listeners.get("panel-restored") ?? []) listener({ payload: null }); };
+    window.__mockEmitCloseRequested = () => {
+      for (const listener of listeners.get("close-requested") ?? []) listener({ payload: null });
     };
 
     window.__TAURI__ = {
@@ -117,19 +152,79 @@ async function installTauriMock(page, options = {}) {
               return config.versionFailure
                 ? Promise.reject(new Error("Version unavailable"))
                 : (config.appVersion ?? config.buildVersion);
-            case "get_usage_state":
+            case "get_usage_state": {
+              const snapshot = { ...currentUsage };
+              if (config.usageReadDelayMs) await new Promise((resolve) => setTimeout(resolve, config.usageReadDelayMs));
               if (config.usageFailure) throw new Error("Usage limits unavailable");
-              return currentUsage;
+              return snapshot;
+            }
             case "load_settings":
               if (config.loadFailure) throw new Error("Settings unavailable");
+              if (config.settingsLoadDelayMs) {
+                await new Promise((resolve) => window.setTimeout(resolve, config.settingsLoadDelayMs));
+              }
+              settingsLoaded = true;
               return { ...settings };
             case "save_settings":
               if (config.saveFailure) throw new Error("Settings could not be saved");
-              settings = { ...args.settings };
+              if (config.saveDelayMs) await new Promise((resolve) => setTimeout(resolve, config.saveDelayMs));
+              settings = {
+                ...settings,
+                ...args.settings,
+                normalWindowSize: settings.normalWindowSize,
+                ultraCompactWindowSize: settings.ultraCompactWindowSize,
+              };
               localStorage.setItem("codex-mystats-ui-settings", JSON.stringify(settings));
               return { ...settings };
-            case "set_ultra_compact":
+            case "set_ultra_compact": {
+              const previousMode = nativeUltraCompact;
+              nativeUltraCompact = args.ultraCompact;
+              if (typeof args.preferredUltraCompact === "boolean") {
+                settings = { ...settings, ultraCompact: args.preferredUltraCompact };
+                localStorage.setItem("codex-mystats-ui-settings", JSON.stringify(settings));
+              }
+              const defaults = args.ultraCompact
+                ? { width: 300, height: 156 }
+                : { width: 360, height: 220 };
+              const savedSize = args.ultraCompact
+                ? settings.ultraCompactWindowSize
+                : settings.normalWindowSize;
+              const size = savedSize ?? defaults;
+              const payload = {
+                width: Math.round(size.width * scaleFactor),
+                height: Math.round(size.height * scaleFactor),
+              };
+              if (skipNativeResize && args.ultraCompact !== previousMode) {
+                skipNativeResize = false;
+              } else {
+                await window.__mockResizeNativeWindow(size);
+                window.__mockWindowResizeEvents.push(payload);
+                for (const listener of resizeListeners) listener({ payload });
+              }
+              return { width: size.width, height: size.height };
+            }
+            case "fit_settings_window": {
+              const size = { width: innerWidth, height: Math.ceil(args.contentHeight) };
+              await window.__mockResizeNativeWindow(size);
+              for (const listener of resizeListeners) listener({ payload: { width: Math.round(size.width * scaleFactor), height: Math.round(size.height * scaleFactor) } });
+              return size;
+            }
+            case "get_native_window_mode":
+              return nativeUltraCompact;
+            case "show_main_panel":
+              window.__mockPanelShown = true;
+              window.__mockPanelStateAtShow = {
+                ultraCompact: document.querySelector(".app-shell")?.dataset.ultraCompact,
+                viewport: { width: innerWidth, height: innerHeight },
+                settingsLoaded,
+              };
+              return undefined;
             case "set_always_on_top":
+              return undefined;
+            case "set_tray_tooltips":
+              window.__mockTooltipValues.push({ ...args });
+              return undefined;
+            case "hide_tray_popup":
               return undefined;
             case "minimize_panel":
             case "quit_app":
@@ -153,19 +248,33 @@ async function installTauriMock(page, options = {}) {
       },
       window: {
         getCurrentWindow: () => ({
+          onResized: async (callback) => {
+            resizeListeners.add(callback);
+            return () => resizeListeners.delete(callback);
+          },
+          innerSize: async () => ({
+            width: Math.round(innerWidth * scaleFactor),
+            height: Math.round(innerHeight * scaleFactor),
+          }),
+          scaleFactor: async () => scaleFactor,
           startResizeDragging: async () => {},
+          startDragging: async () => {
+            window.__mockDragCalls.push("start");
+          },
         }),
       },
     };
   }, { buildVersion: appVersion, ...options });
 
-  await page.goto("/");
-  if (!options.loadFailure) {
-    await page.waitForFunction(() => {
-      if (window.__mockCalls?.some((call) => call.command === "set_always_on_top")) return true;
-      const status = document.querySelector("#connection-message")?.textContent;
-      return status && !["Connecting…", "Conectando…", "Updating limits…", "Actualizando límites…"].includes(status);
-    });
+  await page.goto(route);
+  if (options.waitForInitialization !== false) {
+    if (route.endsWith("/tray.html")) {
+      await page.waitForFunction(() => window.__mockCalls?.some((call) => call.command === "load_settings")
+        && window.__mockCalls?.some((call) => call.command === "get_usage_state")
+        && window.__mockTooltipValues?.length > 1);
+    } else {
+      await page.waitForFunction(() => window.__mockPanelShown === true);
+    }
   }
 }
 
