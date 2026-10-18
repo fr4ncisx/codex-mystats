@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.png" alt="Codex-MyStats" width="320" />
+<img src="logo.png" alt="WIMU" width="320" />
 
 **See your Codex usage limits at a glance**
 
@@ -35,7 +35,7 @@ A compact Windows panel for Codex CLI's five-hour and weekly usage windows.
 - Independent warning thresholds, starting at 20%. Bars turn orange five percentage points above each threshold, then red at the threshold, intensifying toward zero. Tiny bubbles appear in the red zone and respect reduced motion.
 - English by default, with Spanish available in Settings.
 - Independently remembered normal and ultra-compact widths, with fixed panel heights and Settings sized to its visible content.
-- Two tray indicators with matching threshold-aware colors; clicking either restores the full window. Tooltips show remaining usage and reset times.
+- Two tray indicators show `5H` or `7D` above a bold, color-matched percentage enlarged to use the icon area; clicking either restores the full window. Tooltips show remaining usage and reset times.
 - Drag the panel from its name or open header space, including in ultra-compact mode.
 - Remembered close behavior and an always-on-top option in Settings.
 - One running instance; launching it again restores the open panel.
@@ -82,7 +82,7 @@ cargo install tauri-cli --version "=2.12.2" --locked
 cargo tauri build --no-bundle
 ```
 
-The executable is written to `target\release\codex-mystats.exe`.
+The executable is written to `target\release\wimu.exe`.
 
 Run the frontend UI checks with Node.js 24 and Playwright:
 
@@ -100,9 +100,9 @@ These tools are only needed for frontend UI tests; they are not required to buil
 
 ## How updates work
 
-Codex-MyStats reads limits from the compatible Codex CLI over local standard input and output. It applies limit-change events as they arrive and reconciles the values every 15 seconds while connected. If a connection is lost, the panel marks the data stale and reconnects. Event delivery has no documented maximum latency.
+WIMU reads limits from the compatible Codex CLI over local standard input and output. It applies limit-change events as they arrive and reconciles the values every 15 seconds while connected. If a connection is lost, the panel marks the data stale and reconnects. Event delivery has no documented maximum latency.
 
-The app identifies the five-hour and weekly windows from their durations and uses the percentage and reset time returned by Codex. It preserves the source percentage precision and does not estimate a missing window. If Codex CLI is missing, install it and restart Codex-MyStats.
+The app identifies the five-hour and weekly windows from their durations and uses the percentage and reset time returned by Codex. It preserves the source percentage precision and does not estimate a missing window. If Codex CLI is missing, install it and restart WIMU.
 
 ---
 
@@ -111,7 +111,7 @@ The app identifies the five-hour and weekly windows from their durations and use
 | Problem | What to do |
 |---|---|
 | Codex CLI is not found | Add `codex.exe` to `PATH` or install the supported npm package, then restart the app. |
-| Codex CLI version is unsupported | Install version `0.162.1` and restart Codex-MyStats. |
+| Codex CLI version is unsupported | Install version `0.162.1` and restart WIMU. |
 | No usage is available | Sign in through Codex CLI under the same Windows account, then restart the app. |
 | Data is stale | Restore Codex CLI availability; the app reconnects when the connection returns. |
 | A usage window is unavailable | Check that Codex returned that period. The app does not estimate missing data. |
@@ -123,7 +123,7 @@ The app identifies the five-hour and weekly windows from their durations and use
 
 Usage is not fetched anonymously: the app relies on the existing authenticated Codex CLI session for the same Windows account. Codex CLI handles its normal communication with Codex and returns usage data to the app over local standard input and output.
 
-Codex-MyStats does not prompt for, copy, or store passwords or tokens. Its local `settings.json` stores app preferences only. The app opens no network listener and adds no telemetry of its own. The interface uses local files and narrowly scoped Tauri permissions.
+WIMU does not prompt for, copy, or store passwords or tokens. Its local `settings.json` stores app preferences only. The app opens no network listener and adds no telemetry of its own. The interface uses local files and narrowly scoped Tauri permissions.
 
 ---
 
@@ -143,7 +143,7 @@ Report bugs and request improvements through [GitHub Issues](https://github.com/
 
 ## Disclaimer
 
-Codex-MyStats is an independent project. It is not affiliated with or endorsed by OpenAI.
+WIMU is an independent project. It is not affiliated with or endorsed by OpenAI.
 
 ---
 

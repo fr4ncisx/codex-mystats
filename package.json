@@ -1,5 +1,5 @@
 {
-  "name": "codex-mystats-ui-tests",
+  "name": "wimu-ui-tests",
   "private": true,
   "scripts": {
     "test": "node tools/run-playwright.mjs test",

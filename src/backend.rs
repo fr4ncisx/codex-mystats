@@ -579,8 +579,8 @@ fn initialize(
             "id": 0,
             "params": {
                 "clientInfo": {
-                    "name": "codex_mystats",
-                    "title": "Codex-MyStats",
+                    "name": "wimu",
+                    "title": "WIMU",
                     "version": env!("CARGO_PKG_VERSION")
                 }
             }

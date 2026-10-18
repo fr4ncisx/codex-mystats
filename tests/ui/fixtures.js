@@ -79,7 +79,7 @@ async function installTauriMock(page, options = {}, route = "/") {
     };
     let settings;
     try {
-      settings = JSON.parse(localStorage.getItem("codex-mystats-ui-settings"));
+      settings = JSON.parse(localStorage.getItem("wimu-ui-settings"));
     } catch {
       settings = null;
     }
@@ -174,14 +174,14 @@ async function installTauriMock(page, options = {}, route = "/") {
                 normalWindowSize: settings.normalWindowSize,
                 ultraCompactWindowSize: settings.ultraCompactWindowSize,
               };
-              localStorage.setItem("codex-mystats-ui-settings", JSON.stringify(settings));
+              localStorage.setItem("wimu-ui-settings", JSON.stringify(settings));
               return { ...settings };
             case "set_ultra_compact": {
               const previousMode = nativeUltraCompact;
               nativeUltraCompact = args.ultraCompact;
               if (typeof args.preferredUltraCompact === "boolean") {
                 settings = { ...settings, ultraCompact: args.preferredUltraCompact };
-                localStorage.setItem("codex-mystats-ui-settings", JSON.stringify(settings));
+                localStorage.setItem("wimu-ui-settings", JSON.stringify(settings));
               }
               const defaults = args.ultraCompact
                 ? { width: 300, height: 156 }

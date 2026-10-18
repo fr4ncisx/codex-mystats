@@ -155,7 +155,7 @@ test("renders the normal panel at 360 by 220 without overflow or excess bottom s
     settingsLoaded: true,
   });
   expect(await commandCalls(page, "get_app_version")).toHaveLength(1);
-  await expect(page.locator(".app-name")).toHaveText("Codex MyStats");
+  await expect(page.locator(".app-name")).toHaveText("WIMU");
   await expect(page.locator("#five-hour-percent")).toHaveText("72%");
   await expect(page.locator("#weekly-percent")).toHaveText("64%");
   const layout = await verifyVisibleLayout(page, { width: 360, height: 220 });
@@ -217,7 +217,7 @@ test("edits whole-number thresholds and applies marker positions immediately", a
   await page.locator("#threshold-weekly-value").fill("71");
   await expect(page.locator("#threshold-5h-range")).toHaveValue("42");
   await expect(page.locator("#threshold-weekly-range")).toHaveValue("71");
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"threshold5h":42');
 
   await page.getByRole("button", { name: "Back" }).click();
@@ -266,7 +266,7 @@ test("rejects decimal and out-of-range thresholds while keeping the slider synch
     node.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await expect(page.locator("#threshold-5h-value")).toHaveValue("0");
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"threshold5h":0');
 });
 
@@ -280,7 +280,7 @@ test("loads legacy preferences with defaults and preserves saved thresholds afte
   await expect(page.locator("#threshold-5h-value")).toHaveValue("37");
   await expect(page.locator("#threshold-weekly-value")).toHaveValue("62");
   await page.locator("#threshold-5h-value").fill("38");
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"threshold5h":38');
   await page.reload();
 
@@ -624,7 +624,7 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
   await expect.poll(async () => page.locator("#five-hour-title").evaluate((node) => getComputedStyle(node).fontSize))
     .toBe("13px");
   await verifyVisibleLayout(page, { width: 300, height: 156 });
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"ultraCompact":true');
   await page.reload();
   await expect(page.locator(".app-shell")).toHaveAttribute("data-ultra-compact", "true");
@@ -643,7 +643,7 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
   await page.getByRole("button", { name: "Español" }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "es-AR");
   await expect(page.locator("#settings-title")).toHaveText("Configuración");
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"language":"es"');
 
   await page.getByRole("switch", { name: "Mantener la ventana siempre encima" }).click();
@@ -654,7 +654,7 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
     command: "set_always_on_top",
     args: { alwaysOnTop: false },
   });
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"alwaysOnTop":false');
   await page.getByRole("button", { name: "Volver" }).click();
   await expect(page.locator("#settings-panel")).toBeHidden();
@@ -668,11 +668,11 @@ test("toggles ultracompact mode, expands settings temporarily, and restores it",
   await verifyCloseDialogLayout(page);
   await expect(page.getByRole("button", { name: "Cancelar" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Minimizar en la bandeja" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Salir de Codex-MyStats" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Salir de WIMU" })).toBeVisible();
   await page.getByRole("button", { name: "Cancelar" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
   await page.getByRole("button", { name: "Cerrar" }).click();
-  await page.getByRole("button", { name: "Salir de Codex-MyStats" }).click();
+  await page.getByRole("button", { name: "Salir de WIMU" }).click();
   await expect.poll(async () => (await commandCalls(page, "quit_app")).length).toBe(1);
 });
 
@@ -704,7 +704,7 @@ test("keeps every compact close action visible together when saving the choice f
     .toHaveText("Could not save this choice. Please try again.");
   await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Minimize in the tray" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Quit Codex-MyStats" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Quit WIMU" })).toBeVisible();
   await verifyCloseDialogLayout(page);
 
   await fs.mkdir(previewDirectory, { recursive: true });
@@ -720,7 +720,7 @@ test("remembers the close action across restart and can restore asking each time
   await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("checkbox", { name: "Remember my choice" }).check();
   await page.getByRole("button", { name: "Minimize in the tray" }).click();
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"closeAction":"minimize"');
   await expect.poll(async () => (await commandCalls(page, "minimize_panel")).length).toBe(1);
 
@@ -734,7 +734,7 @@ test("remembers the close action across restart and can restore asking each time
   await expect(page.locator("#remembered-close-text")).toHaveText("Minimize in the tray");
   await page.getByRole("button", { name: "Ask every time" }).click();
   await expect(page.locator("#remembered-close-setting")).toBeHidden();
-  await expect.poll(async () => page.evaluate(() => localStorage.getItem("codex-mystats-ui-settings")))
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("wimu-ui-settings")))
     .toContain('"closeAction":"ask"');
 
   await page.reload();

@@ -52,7 +52,7 @@ jobs:
             throw "Cargo metadata validation failed."
           }
           $metadata = $metadataJson | ConvertFrom-Json
-          $manifestVersion = ($metadata.packages | Where-Object { $_.name -eq "codex-mystats" }).version
+          $manifestVersion = ($metadata.packages | Where-Object { $_.name -eq "wimu" }).version
           $appVersion = (Get-Content -Raw tauri.conf.json | ConvertFrom-Json).version
           if ($manifestVersion -ne $appVersion) {
             throw "Cargo.toml version $manifestVersion does not match tauri.conf.json version $appVersion."
@@ -93,12 +93,13 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          $executablePath = "target\release\codex-mystats.exe"
+          $executablePath = "target\release\wimu.exe"
           if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
             throw "The Windows executable was not produced."
           }
           New-Item -ItemType Directory -Path "release-assets" | Out-Null
-          $executableName = "Codex-MyStats-$($env:RELEASE_TAG)-windows-x64.exe"
+          $productName = (Get-Content -Raw tauri.conf.json | ConvertFrom-Json).productName
+          $executableName = "$productName-$($env:RELEASE_TAG)-windows-x64.exe"
           $stagedExecutablePath = Join-Path "release-assets" $executableName
           Copy-Item -LiteralPath $executablePath -Destination $stagedExecutablePath
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stagedExecutablePath).Hash.ToLowerInvariant()
@@ -144,6 +145,7 @@ jobs:
             throw "Curated release notes not found: $releaseNotesPath"
           }
           $releaseBody = Get-Content -Raw -LiteralPath $releaseNotesPath -Encoding utf8
+          $productName = (Get-Content -Raw tauri.conf.json | ConvertFrom-Json).productName
           $headers = @{
             Authorization = "Bearer $env:GITHUB_TOKEN"
             Accept = "application/vnd.github+json"
@@ -162,7 +164,7 @@ jobs:
           if ($null -eq $release) {
             $payload = @{
               tag_name = $env:RELEASE_TAG
-              name = "Codex-MyStats $($env:RELEASE_TAG)"
+              name = "$productName $($env:RELEASE_TAG)"
               body = $releaseBody
               draft = $true
               prerelease = $false
@@ -173,7 +175,7 @@ jobs:
             throw "Release $($env:RELEASE_TAG) is already published; refusing to replace its assets."
           } else {
             $payload = @{
-              name = "Codex-MyStats $($env:RELEASE_TAG)"
+              name = "$productName $($env:RELEASE_TAG)"
               body = $releaseBody
             } | ConvertTo-Json
             $release = Invoke-RestMethod -Method Patch -Uri "$api/releases/$($release.id)" -Headers $headers -ContentType "application/json" -Body $payload

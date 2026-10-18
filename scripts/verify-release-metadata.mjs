@@ -19,11 +19,11 @@ if (metadataResult.status !== 0) {
 
 const metadata = JSON.parse(metadataResult.stdout);
 const packageVersion = metadata.packages.find(
-  (packageInfo) => packageInfo.name === "codex-mystats",
+  (packageInfo) => packageInfo.name === "wimu",
 )?.version;
 
 if (!packageVersion) {
-  throw new Error("Cargo metadata does not contain the codex-mystats package.");
+  throw new Error("Cargo metadata does not contain the wimu package.");
 }
 
 const tauriConfig = JSON.parse(readFileSync("tauri.conf.json", "utf8"));
@@ -41,12 +41,12 @@ const releaseNotesPath = resolve(
   `v${tauriVersion}.md`,
 );
 const releaseNotes = readFileSync(releaseNotesPath, "utf8");
-const expectedHeading = `# Codex-MyStats v${tauriVersion}`;
 const firstHeading = releaseNotes.split(/\r?\n/, 1)[0];
+const noteVersion = firstHeading.match(/^# .+ (v\d+\.\d+\.\d+)$/)?.[1];
 
-if (firstHeading !== expectedHeading) {
+if (noteVersion !== `v${tauriVersion}`) {
   throw new Error(
-    `Expected release notes to start with "${expectedHeading}", got "${firstHeading}".`,
+    `Expected release notes for v${tauriVersion}, got "${firstHeading}".`,
   );
 }
 
