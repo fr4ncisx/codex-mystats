@@ -19,6 +19,29 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
 
+      - name: Identify Rust compiler
+        id: rust-version
+        shell: pwsh
+        run: |
+          $version = rustc --version
+          if ($LASTEXITCODE -ne 0) { throw "Could not identify Rust compiler." }
+          "version=$($version -replace '[^a-zA-Z0-9.-]', '-')" >> $env:GITHUB_OUTPUT
+
+      - name: Cache Rust dependencies and build outputs
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            target/debug
+            target/release
+            !target/**/incremental
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'build.rs', 'tauri.conf.json', 'src/**', 'frontend/**', 'icons/**', 'capabilities/**', 'permissions/**', 'tests/usage-color-cases.json') }}
+          restore-keys: |
+            rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-
+
       - name: Verify tag matches the app version
         shell: pwsh
         env:
@@ -38,8 +61,29 @@ jobs:
             throw "Release tag $($env:RELEASE_TAG) does not match app version v$appVersion."
           }
 
+      - name: Cache Tauri CLI 2.12.2
+        id: tauri-cli-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ${{ runner.tool_cache }}/tauri-cli/2.12.2
+          key: tauri-cli-v1-${{ runner.os }}-${{ runner.arch }}-2.12.2
+
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "=2.12.2" --locked
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: cargo install tauri-cli --version "=2.12.2" --locked --root "${{ runner.tool_cache }}/tauri-cli/2.12.2"
+
+      - name: Add Tauri CLI to PATH
+        shell: pwsh
+        run: '"${{ runner.tool_cache }}/tauri-cli/2.12.2/bin" >> $env:GITHUB_PATH'
+
+      - name: Verify Tauri CLI version
+        shell: pwsh
+        run: |
+          $version = cargo tauri --version
+          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne 'tauri-cli 2.12.2') {
+            throw "Expected Tauri CLI 2.12.2, got: $version"
+          }
 
       - name: Build executable without installer
         run: cargo tauri build --no-bundle

@@ -37,6 +37,7 @@ A compact Windows panel for Codex CLI's five-hour and weekly usage windows.
 - Independently remembered normal and ultra-compact widths, with fixed panel heights and Settings sized to its visible content.
 - Two tray indicators with matching threshold-aware colors; clicking either restores the full window. Tooltips show remaining usage and reset times.
 - Drag the panel from its name or open header space, including in ultra-compact mode.
+- Remembered close behavior and an always-on-top option in Settings.
 - One running instance; launching it again restores the open panel.
 
 ---
@@ -45,13 +46,13 @@ A compact Windows panel for Codex CLI's five-hour and weekly usage windows.
 
 ### To run
 
-- Windows 10 or 11 with WebView2 Runtime.
+- Windows 10+ with WebView2 Runtime.
 - Codex CLI `0.162.1`, discoverable on `PATH` or in its standard npm installation under `%APPDATA%`.
 - Codex CLI already signed in under the same Windows account.
 
 ### To build
 
-- Windows 10 or 11.
+- Windows 10+.
 - Rust with the `x86_64-pc-windows-msvc` target and Microsoft C++ Build Tools with the **Desktop development with C++** workload.
 - Tauri CLI `2.12.2` to build the executable.
 
@@ -128,7 +129,9 @@ Codex-MyStats does not prompt for, copy, or store passwords or tokens. Its local
 
 ## Releases
 
-Pushing an annotated version tag that matches `Cargo.toml` and `tauri.conf.json` starts the Windows release workflow. It creates a draft containing the executable and its SHA-256 checksum; a maintainer reviews and publishes the draft manually. CI checks formatting, Rust tests, and JavaScript syntax on pull requests and pushes to `main`.
+CI validates version metadata, Rust formatting and tests, JavaScript syntax, Playwright UI tests, and the Windows build on pull requests and pushes to `main`. CI and release builds cache Tauri CLI `2.12.2`, Cargo dependencies, and Rust build outputs; CI also caches npm downloads. The first successful run populates the caches.
+
+After CI passes for the intended commit, push an annotated version tag that matches `Cargo.toml` and `tauri.conf.json` to start the Windows release workflow. It creates a draft containing the executable and its SHA-256 checksum; a maintainer reviews and publishes the draft manually.
 
 ---
 
