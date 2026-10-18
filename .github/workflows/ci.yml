@@ -39,9 +39,9 @@ jobs:
             target/debug
             target/release
             !target/**/incremental
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'build.rs', 'tauri.conf.json', 'src/**', 'frontend/**', 'icons/**', 'capabilities/**', 'permissions/**', 'tests/usage-color-cases.json') }}
+          key: rust-v2-${{ github.repository }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'build.rs', 'tauri.conf.json', 'src/**', 'frontend/**', 'icons/**', 'capabilities/**', 'permissions/**', 'tests/usage-color-cases.json') }}
           restore-keys: |
-            rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-
+            rust-v2-${{ github.repository }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-
 
       - name: Set up Node.js 24
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

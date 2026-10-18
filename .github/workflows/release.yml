@@ -38,9 +38,9 @@ jobs:
             target/debug
             target/release
             !target/**/incremental
-          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'build.rs', 'tauri.conf.json', 'src/**', 'frontend/**', 'icons/**', 'capabilities/**', 'permissions/**', 'tests/usage-color-cases.json') }}
+          key: rust-v2-${{ github.repository }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-${{ hashFiles('Cargo.toml', 'build.rs', 'tauri.conf.json', 'src/**', 'frontend/**', 'icons/**', 'capabilities/**', 'permissions/**', 'tests/usage-color-cases.json') }}
           restore-keys: |
-            rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-
+            rust-v2-${{ github.repository }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-version.outputs.version }}-${{ hashFiles('Cargo.lock') }}-
 
       - name: Verify tag matches the app version
         shell: pwsh
