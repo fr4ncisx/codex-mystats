@@ -771,67 +771,124 @@ fn start_window_size_writer(
         });
 }
 
-const DIGIT_FIVE: [u8; 7] = [
-    0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
-];
-const DIGIT_SEVEN: [u8; 7] = [
-    0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
-];
-const LETTER_H: [u8; 7] = [
-    0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
-];
-const LETTER_D: [u8; 7] = [
-    0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
-];
+const TRAY_LABEL_COLOR: [u8; 4] = [245, 246, 248, 255];
+const TRAY_NEUTRAL_COLOR: [u8; 4] = [105, 107, 116, 255];
 
-const TRAY_NEUTRAL_COLOR: [u8; 3] = [105, 107, 116];
-
-fn blend_color(from: [u8; 3], to: [u8; 3], amount: f64) -> [u8; 3] {
-    presentation::blend(from, to, amount)
-}
-
-fn tray_fill_color(remaining: f64, threshold: f64, position: f64) -> [u8; 3] {
-    let palette = presentation::palette(remaining, threshold);
-    if position <= 0.52 {
-        blend_color(palette.deep, palette.mid, position / 0.52)
-    } else {
-        blend_color(palette.mid, palette.light, (position - 0.52) / 0.48)
+fn tray_percent_text(remaining: Option<f64>, is_fresh: bool) -> String {
+    match remaining.filter(|value| is_fresh && value.is_finite()) {
+        Some(value) => format!("{}%", value.clamp(0.0, 100.0).round() as u32),
+        None => "—".to_owned(),
     }
 }
 
-fn tray_fill_width(remaining: Option<f64>, is_fresh: bool) -> u32 {
-    let Some(remaining) = remaining.filter(|value| value.is_finite()) else {
-        return 0;
-    };
-    let bounded = remaining.clamp(0.0, 100.0);
-    if !is_fresh || bounded == 0.0 {
-        0
-    } else {
-        (((bounded / 100.0) * 24.0).round() as u32).max(1)
+fn tray_glyph(character: char, compact_width: bool) -> [u8; 7] {
+    if compact_width {
+        return match character {
+            '0' => [0b111, 0b101, 0b101, 0b101, 0b101, 0b101, 0b111],
+            '1' => [0b010, 0b110, 0b010, 0b010, 0b010, 0b010, 0b111],
+            '%' => [0b101, 0b001, 0b010, 0b010, 0b010, 0b100, 0b101],
+            _ => [0; 7],
+        };
+    }
+
+    match character {
+        '0' => [0b1111, 0b1001, 0b1001, 0b1001, 0b1001, 0b1001, 0b1111],
+        '1' => [0b0010, 0b0110, 0b0010, 0b0010, 0b0010, 0b0010, 0b0111],
+        '2' => [0b1111, 0b0001, 0b0001, 0b1111, 0b1000, 0b1000, 0b1111],
+        '3' => [0b1111, 0b0001, 0b0001, 0b0111, 0b0001, 0b0001, 0b1111],
+        '4' => [0b1001, 0b1001, 0b1001, 0b1111, 0b0001, 0b0001, 0b0001],
+        '5' => [0b1111, 0b1000, 0b1000, 0b1111, 0b0001, 0b0001, 0b1111],
+        '6' => [0b1111, 0b1000, 0b1000, 0b1111, 0b1001, 0b1001, 0b1111],
+        '7' => [0b1111, 0b0001, 0b0001, 0b0010, 0b0010, 0b0010, 0b0010],
+        '8' => [0b1111, 0b1001, 0b1001, 0b1111, 0b1001, 0b1001, 0b1111],
+        '9' => [0b1111, 0b1001, 0b1001, 0b1111, 0b0001, 0b0001, 0b1111],
+        'H' => [0b1001, 0b1001, 0b1001, 0b1111, 0b1001, 0b1001, 0b1001],
+        'D' => [0b1110, 0b1001, 0b1001, 0b1001, 0b1001, 0b1001, 0b1110],
+        '%' => [0b1001, 0b0001, 0b0010, 0b0100, 0b1000, 0b1001, 0b0000],
+        '—' => [0, 0, 0, 0b1111, 0, 0, 0],
+        _ => [0; 7],
     }
 }
 
 fn set_icon_pixel(rgba: &mut [u8], x: u32, y: u32, color: [u8; 4]) {
-    if x >= 32 || y >= 32 {
-        return;
+    if x < 32 && y < 32 {
+        let index = ((y * 32 + x) * 4) as usize;
+        rgba[index..index + 4].copy_from_slice(&color);
     }
-    let index = ((y * 32 + x) * 4) as usize;
-    rgba[index..index + 4].copy_from_slice(&color);
 }
 
-fn draw_icon_glyph(rgba: &mut [u8], x: u32, glyph: &[u8; 7], color: [u8; 4]) {
-    for (row, bits) in glyph.iter().enumerate() {
-        for column in 0..5u32 {
-            if bits & (1 << (4 - column)) == 0 {
-                continue;
-            }
-            for dy in 0..2u32 {
-                for dx in 0..2u32 {
-                    set_icon_pixel(rgba, x + column * 2 + dx, 2 + row as u32 * 2 + dy, color);
+fn tray_text_width(text: &str, compact_width: bool) -> u32 {
+    let glyph_width = if compact_width { 3 } else { 4 };
+    text.chars().count() as u32 * glyph_width * 2
+        + text
+            .chars()
+            .skip(1)
+            .map(|character| tray_text_spacing(text, character))
+            .sum::<u32>()
+}
+
+fn tray_text_spacing(text: &str, next_character: char) -> u32 {
+    if next_character == '%' && text.chars().count() == 3 {
+        6
+    } else if next_character == '%' {
+        4
+    } else {
+        2
+    }
+}
+
+fn draw_tray_text(rgba: &mut [u8], text: &str, y: u32, color: [u8; 4]) {
+    let characters: Vec<char> = text.chars().collect();
+    let compact_width = text == "100%";
+    let glyph_width = if compact_width { 3 } else { 4 };
+    let character_width = glyph_width * 2;
+    let text_width = tray_text_width(text, compact_width);
+    let mut x = ((32 - text_width) / 2) & !1;
+    for (character_index, character) in characters.iter().copied().enumerate() {
+        let glyph = tray_glyph(character, compact_width);
+        for (row, bits) in glyph.into_iter().enumerate() {
+            for column in 0..glyph_width {
+                if bits & (1 << (glyph_width - 1 - column)) != 0 {
+                    for y_offset in 0..2 {
+                        for x_offset in 0..2 {
+                            set_icon_pixel(
+                                rgba,
+                                x + column * 2 + x_offset,
+                                y + row as u32 * 2 + y_offset,
+                                color,
+                            );
+                        }
+                    }
                 }
             }
         }
+        x += character_width;
+        if let Some(next_character) = characters.get(character_index + 1) {
+            x += tray_text_spacing(text, *next_character);
+        }
     }
+}
+
+fn tray_icon_pixels(
+    is_weekly: bool,
+    remaining: Option<f64>,
+    is_fresh: bool,
+    threshold: f64,
+) -> Vec<u8> {
+    let mut rgba = vec![0u8; 32 * 32 * 4];
+    let label = if is_weekly { "7D" } else { "5H" };
+    let percentage = tray_percent_text(remaining, is_fresh);
+    let label_color = TRAY_LABEL_COLOR;
+    let value_color = match remaining.filter(|value| is_fresh && value.is_finite()) {
+        Some(value) => {
+            let color = presentation::palette(value.clamp(0.0, 100.0), threshold).mid;
+            [color[0], color[1], color[2], 255]
+        }
+        None => TRAY_NEUTRAL_COLOR,
+    };
+    draw_tray_text(&mut rgba, label, 0, label_color);
+    draw_tray_text(&mut rgba, &percentage, 16, value_color);
+    rgba
 }
 
 fn tray_icon(
@@ -840,52 +897,11 @@ fn tray_icon(
     is_fresh: bool,
     threshold: f64,
 ) -> tauri::image::Image<'static> {
-    let mut rgba = vec![0u8; 32 * 32 * 4];
-    let glyph_color = [232, 235, 237, 255];
-    let remaining = remaining
-        .filter(|value| value.is_finite())
-        .map(|value| value.clamp(0.0, 100.0));
-
-    if is_weekly {
-        draw_icon_glyph(&mut rgba, 4, &DIGIT_SEVEN, glyph_color);
-        draw_icon_glyph(&mut rgba, 16, &LETTER_D, glyph_color);
-    } else {
-        draw_icon_glyph(&mut rgba, 4, &DIGIT_FIVE, glyph_color);
-        draw_icon_glyph(&mut rgba, 16, &LETTER_H, glyph_color);
-    }
-
-    let track_color = [46, 50, 54, 255];
-    for y in 22..27u32 {
-        for x in 4..28u32 {
-            set_icon_pixel(&mut rgba, x, y, track_color);
-        }
-    }
-    let fill_width = tray_fill_width(remaining, is_fresh);
-    for y in 22..27u32 {
-        for x in 4..4 + fill_width {
-            let color = match remaining.filter(|_| is_fresh) {
-                Some(value) => {
-                    let position =
-                        f64::from(x - 4) / f64::from(fill_width.saturating_sub(1).max(1));
-                    let mut blended = tray_fill_color(value, threshold, position);
-                    if y == 22 {
-                        blended = blend_color(blended, [255, 255, 255], 0.24);
-                    } else if y == 26 {
-                        blended = blend_color(blended, [0, 0, 0], 0.12);
-                    }
-                    [blended[0], blended[1], blended[2], 255]
-                }
-                None => [
-                    TRAY_NEUTRAL_COLOR[0],
-                    TRAY_NEUTRAL_COLOR[1],
-                    TRAY_NEUTRAL_COLOR[2],
-                    255,
-                ],
-            };
-            set_icon_pixel(&mut rgba, x, y, color);
-        }
-    }
-    tauri::image::Image::new_owned(rgba, 32, 32)
+    tauri::image::Image::new_owned(
+        tray_icon_pixels(is_weekly, remaining, is_fresh, threshold),
+        32,
+        32,
+    )
 }
 
 fn localized(language: Language, english: &'static str, spanish: &'static str) -> &'static str {
@@ -1450,15 +1466,209 @@ mod tests {
     }
 
     #[test]
-    fn tray_colors_follow_each_threshold_and_shared_palette() {
-        for threshold in [0.0, 10.0, 20.0, 80.0, 100.0] {
-            for remaining in [0.0, 5.0, 10.0, 20.0, 25.0, 25.01, 50.0, 84.0, 100.0] {
-                assert_eq!(
-                    tray_fill_color(remaining, threshold, 0.52),
-                    presentation::palette(remaining, threshold).mid
-                );
+    fn tray_percent_text_rounds_clamps_and_omits_stale_values() {
+        for remaining in 0..=100 {
+            assert_eq!(
+                tray_percent_text(Some(f64::from(remaining)), true),
+                format!("{remaining}%")
+            );
+        }
+        for (remaining, expected) in [
+            (Some(0.0), "0%"),
+            (Some(0.4), "0%"),
+            (Some(0.5), "1%"),
+            (Some(19.49), "19%"),
+            (Some(19.5), "20%"),
+            (Some(99.9), "100%"),
+            (Some(100.0), "100%"),
+            (Some(101.0), "100%"),
+            (Some(-1.0), "0%"),
+        ] {
+            assert_eq!(tray_percent_text(remaining, true), expected);
+        }
+        assert_eq!(tray_percent_text(None, true), "—");
+        assert_eq!(tray_percent_text(Some(61.0), false), "—");
+        assert_eq!(tray_percent_text(Some(f64::NAN), true), "—");
+        assert_eq!(tray_percent_text(Some(f64::INFINITY), true), "—");
+    }
+
+    #[test]
+    fn tray_icons_use_shared_threshold_colors_and_neutral_unavailable_state() {
+        for (is_weekly, threshold) in [(false, 10.0), (true, 50.0)] {
+            for remaining in (0_u32..=100).map(f64::from).chain([
+                threshold - 0.01,
+                threshold + 0.01,
+                threshold + 4.99,
+                threshold + 5.0,
+                threshold + 5.01,
+            ]) {
+                let rgba = tray_icon_pixels(is_weekly, Some(remaining), true, threshold);
+                let expected = presentation::palette(remaining, threshold).mid;
+                assert!(rgba
+                    .chunks_exact(4)
+                    .enumerate()
+                    .any(|(index, pixel)| index / 32 >= 16 && pixel[..3] == expected));
             }
         }
+        for (remaining, is_fresh) in [(None, true), (Some(61.0), false), (Some(f64::NAN), true)] {
+            let rgba = tray_icon_pixels(false, remaining, is_fresh, 20.0);
+            assert!(rgba
+                .chunks_exact(4)
+                .enumerate()
+                .any(|(index, pixel)| index / 32 >= 16 && pixel == TRAY_NEUTRAL_COLOR));
+            assert!(!rgba
+                .chunks_exact(4)
+                .enumerate()
+                .any(|(index, pixel)| index / 32 >= 16
+                    && pixel[..3] == presentation::palette(61.0, 20.0).mid));
+        }
+    }
+
+    #[test]
+    fn tray_icons_stack_period_and_larger_colored_value_without_separator() {
+        let rgba = tray_icon_pixels(false, Some(8.0), true, 20.0);
+        assert!((0..10).any(|y| {
+            (0..32).any(|x| {
+                let index = ((y * 32 + x) * 4) as usize;
+                rgba[index..index + 4] == [245, 246, 248, 255]
+            })
+        }));
+        for y in 14..16 {
+            for x in 0..32 {
+                let index = ((y * 32 + x) * 4) as usize;
+                assert_eq!(&rgba[index..index + 4], &[0, 0, 0, 0]);
+            }
+        }
+        assert!((0..32).any(|x| {
+            let index = ((9 * 32 + x) * 4) as usize;
+            rgba[index..index + 4] == TRAY_LABEL_COLOR
+        }));
+        for y in 30..32 {
+            assert!((0..32).all(|x| {
+                let index = ((y * 32 + x) * 4) as usize;
+                rgba[index + 3] == 0
+            }));
+        }
+        let value_color = presentation::palette(8.0, 20.0).mid;
+        for y in [16, 29] {
+            assert!((0..32).any(|x| {
+                let index = ((y * 32 + x) * 4) as usize;
+                rgba[index..index + 3] == value_color
+            }));
+        }
+        assert!((0..32).any(|x| {
+            let index = ((25 * 32 + x) * 4) as usize;
+            rgba[index..index + 3] == value_color
+        }));
+    }
+
+    #[test]
+    fn tray_percentage_sign_has_a_clear_gap_after_the_number() {
+        let rgba = tray_icon_pixels(false, Some(73.0), true, 20.0);
+        for y in 16..30 {
+            for x in 18..24 {
+                let index = ((y * 32 + x) * 4) as usize;
+                assert_eq!(&rgba[index..index + 4], &[0, 0, 0, 0]);
+            }
+        }
+    }
+
+    #[test]
+    fn tray_percentages_are_centered_and_spaced_from_the_period_label() {
+        for remaining in [Some(8.0), Some(27.0), Some(100.0), None] {
+            let rgba = tray_icon_pixels(false, remaining, true, 20.0);
+            for y in 14..16 {
+                assert!((0..32).all(|x| {
+                    let index = ((y * 32 + x) * 4) as usize;
+                    rgba[index + 3] == 0
+                }));
+            }
+            let occupied_x: Vec<u32> = rgba
+                .chunks_exact(4)
+                .enumerate()
+                .filter(|(index, pixel)| index / 32 >= 16 && index / 32 < 30 && pixel[3] != 0)
+                .map(|(index, _)| (index % 32) as u32)
+                .collect();
+            let min_x = *occupied_x.iter().min().unwrap();
+            let max_x = *occupied_x.iter().max().unwrap();
+            assert_eq!(min_x + max_x, 31);
+        }
+    }
+
+    #[test]
+    fn tray_icon_text_fits_and_centers_the_full_100_percent_value() {
+        for is_weekly in [false, true] {
+            let rgba = tray_icon_pixels(is_weekly, Some(100.0), true, 20.0);
+            assert_eq!(rgba.len(), 32 * 32 * 4);
+            let occupied_x: Vec<u32> = rgba
+                .chunks_exact(4)
+                .enumerate()
+                .filter(|(index, pixel)| index / 32 >= 16 && pixel[3] != 0)
+                .map(|(index, _)| (index % 32) as u32)
+                .collect();
+            let min_x = *occupied_x.iter().min().unwrap();
+            let max_x = *occupied_x.iter().max().unwrap();
+            assert_eq!(min_x, 0);
+            assert_eq!(max_x, 31);
+            assert_eq!(max_x - min_x + 1, 32);
+            assert!(rgba.chunks_exact(4).any(|pixel| pixel == TRAY_LABEL_COLOR));
+        }
+    }
+
+    #[test]
+    fn tray_icon_uses_a_wider_font_for_values_that_leave_room() {
+        for (remaining, expected_width) in [(Some(8.0), 20), (Some(99.0), 32), (Some(100.0), 32)] {
+            let text = tray_percent_text(remaining, true);
+            let compact_width = text == "100%";
+            assert_eq!(tray_text_width(&text, compact_width), expected_width);
+
+            let rgba = tray_icon_pixels(false, remaining, true, 20.0);
+            assert_eq!(rgba.len(), 32 * 32 * 4);
+            assert!((16..30).any(|y| {
+                (0..32).any(|x| {
+                    let index = ((y * 32 + x) * 4) as usize;
+                    rgba[index + 3] != 0
+                })
+            }));
+        }
+
+        for remaining in 0..=100 {
+            let text = tray_percent_text(Some(f64::from(remaining)), true);
+            assert!(tray_text_width(&text, text == "100%") <= 32);
+        }
+    }
+
+    #[test]
+    fn tray_icon_pixels_align_to_the_native_16px_grid() {
+        let rgba = tray_icon_pixels(false, Some(100.0), true, 20.0);
+        for y in (0..32).step_by(2) {
+            for x in (0..32).step_by(2) {
+                let pixel = ((y * 32 + x) * 4) as usize;
+                for y_offset in 0..2 {
+                    for x_offset in 0..2 {
+                        let aligned_pixel = (((y + y_offset) * 32 + x + x_offset) * 4) as usize;
+                        assert_eq!(
+                            &rgba[pixel..pixel + 4],
+                            &rgba[aligned_pixel..aligned_pixel + 4]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tray_icons_distinguish_five_hour_and_weekly_periods() {
+        let five_hour = tray_icon_pixels(false, None, false, 20.0);
+        let weekly = tray_icon_pixels(true, None, false, 20.0);
+        let label_bytes = 10 * 32 * 4;
+        assert_ne!(&five_hour[..label_bytes], &weekly[..label_bytes]);
+        assert!(five_hour[..label_bytes]
+            .chunks_exact(4)
+            .any(|pixel| pixel == TRAY_LABEL_COLOR));
+        assert!(weekly[..label_bytes]
+            .chunks_exact(4)
+            .any(|pixel| pixel == TRAY_LABEL_COLOR));
     }
 
     #[test]
@@ -1491,15 +1701,5 @@ mod tests {
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
         fs::remove_file(path).unwrap();
         fs::remove_dir(directory).unwrap();
-    }
-
-    #[test]
-    fn tray_bar_width_matches_zero_and_small_percentages() {
-        assert_eq!(tray_fill_width(Some(0.0), true), 0);
-        assert_eq!(tray_fill_width(Some(1.0), true), 1);
-        assert_eq!(tray_fill_width(Some(100.0), true), 24);
-        assert_eq!(tray_fill_width(Some(50.0), false), 0);
-        assert_eq!(tray_fill_width(None, true), 0);
-        assert_eq!(tray_fill_width(Some(f64::NAN), true), 0);
     }
 }
