@@ -1683,7 +1683,7 @@ mod tests {
     #[test]
     fn atomic_preferences_replace_existing_file_and_preserve_valid_json() {
         let directory = std::env::temp_dir().join(format!(
-            "mystats-settings-test-{}-{}",
+            "wimu-settings-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
