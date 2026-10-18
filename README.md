@@ -1,14 +1,18 @@
 <div align="center">
 
-<img src="logo.png" alt="WIMU" width="320" />
+<p><img src="logo.png" alt="WIMU" width="320" /></p>
+
+<p><img src="wordmark.png" alt="Where Is My Usage" width="240" /></p>
+
+</div>
+
+<div align="center">
 
 **See your Codex usage limits at a glance**
-
 A compact Windows panel for Codex CLI's five-hour and weekly usage windows.
+<br>
 
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square)](https://www.microsoft.com/windows)
-[![Stack: Rust and Tauri](https://img.shields.io/badge/stack-Rust%20%2B%20Tauri-DEA584?style=flat-square)](https://v2.tauri.app/)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square)](https://www.microsoft.com/windows) [![Stack: Rust and Tauri](https://img.shields.io/badge/stack-Rust%20%2B%20Tauri-DEA584?style=flat-square)](https://v2.tauri.app/) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
 </div>
 
