@@ -41,7 +41,9 @@ jobs:
         run: cargo test --locked
 
       - name: Check frontend JavaScript syntax
-        run: node --check frontend/app.js
+        run: |
+          node --check frontend/app.js
+          node --check frontend/usage-colors.js
 
       - name: Run Playwright UI tests
         run: npm test
