@@ -723,7 +723,7 @@ async function fitSettingsWindow() {
   const height = Math.ceil(header.getBoundingClientRect().height + elements.settingsPanel.getBoundingClientRect().height
     + parseFloat(shellStyle.paddingTop) + parseFloat(shellStyle.paddingBottom)
     + parseFloat(shellStyle.borderTopWidth) + parseFloat(shellStyle.borderBottomWidth)
-    + parseFloat(getComputedStyle(header).marginBottom));
+    + parseFloat(getComputedStyle(header).marginBottom)) + 1;
   if (height === lastSettingsHeight) return;
   lastSettingsHeight = height;
   const target = await invoke("fit_settings_window", { contentHeight: Math.max(120, height) });
