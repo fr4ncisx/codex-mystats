@@ -16,5 +16,5 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", default-features = false, features = ["tray-icon", "wry", "common-controls-v6", "dynamic-acl"] }
 tauri-plugin-single-instance = "2.5.3"
