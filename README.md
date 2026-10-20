@@ -1,6 +1,6 @@
 <div align="center">
 
-<p><img src="logo.png" alt="WIMU" width="320" /></p>
+<p><img src="logo.png" alt="WIMU" width="320"/></p>
 
 <p><img src="wordmark.png" alt="Where Is My Usage" width="240" /></p>
 
@@ -38,10 +38,11 @@ A compact Windows panel for Codex CLI's five-hour and weekly usage windows.
 - Remaining usage and reset times for the five-hour and weekly windows.
 - Independent warning thresholds, starting at 20%. Bars turn orange five percentage points above each threshold, then red at the threshold, intensifying toward zero. Tiny bubbles appear in the red zone and respect reduced motion.
 - English by default, with Spanish available in Settings.
-- Independently remembered normal and ultra-compact widths, with fixed panel heights and Settings sized to its visible content.
+- Optional sound alerts, off by default, for usage-window resets and threshold crossings. The header bell saves this preference. The bundled [New Notification 017](https://pixabay.com/es/sound-effects/pel%C3%ADculas-y-efectos-especiales-new-notification-017-352293/) by Universfield plays on resets; [low_battery](https://pixabay.com/es/sound-effects/pel%C3%ADculas-y-efectos-especiales-low-battery-329310/) by u_edtmwfwu7c plays when remaining usage crosses its threshold. Both are included under Pixabay's [Content License](https://pixabay.com/service/license-summary/).
+- Remembers the panel's screen position and normal and ultra-compact widths; panel heights stay fixed and Settings fits its visible content. A first launch opens centered.
 - Two tray indicators show `5H` or `7D` above a bold, color-matched percentage enlarged to use the icon area; clicking either restores the full window. Tooltips show remaining usage and reset times.
 - Drag the panel from its name or open header space, including in ultra-compact mode.
-- Remembered close behavior and an always-on-top option in Settings.
+- Remembered close behavior and an always-on-top option in Settings. When minimized, decorative meter animations pause and the panel stops repainting; usage updates and tray indicators remain active.
 - One running instance; launching it again restores the open panel.
 
 ---

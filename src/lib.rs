@@ -22,6 +22,7 @@ const NORMAL_WINDOW_MIN_SIZE: (f64, f64) = (320.0, 220.0);
 const ULTRA_COMPACT_WINDOW_SIZE: (f64, f64) = (300.0, 156.0);
 const ULTRA_COMPACT_WINDOW_MIN_SIZE: (f64, f64) = ULTRA_COMPACT_WINDOW_SIZE;
 const MAX_WINDOW_DIMENSION: f64 = 4096.0;
+const MAX_WINDOW_POSITION_COORDINATE: i32 = 65_536;
 const RESIZE_SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 const RESIZE_EVENT_SUPPRESSION: Duration = Duration::from_millis(700);
 
@@ -30,6 +31,60 @@ const RESIZE_EVENT_SUPPRESSION: Duration = Duration::from_millis(700);
 pub struct WindowSize {
     pub width: f64,
     pub height: f64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WindowPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl WindowPosition {
+    fn is_valid(self) -> bool {
+        (-MAX_WINDOW_POSITION_COORDINATE..=MAX_WINDOW_POSITION_COORDINATE).contains(&self.x)
+            && (-MAX_WINDOW_POSITION_COORDINATE..=MAX_WINDOW_POSITION_COORDINATE).contains(&self.y)
+    }
+}
+
+fn window_position_has_visible_header(
+    position: WindowPosition,
+    window_size: (u32, u32),
+    monitors: impl IntoIterator<Item = (i32, i32, u32, u32)>,
+) -> bool {
+    let left = i64::from(position.x);
+    let top = i64::from(position.y);
+    let header_right = left + i64::from(window_size.0.min(80));
+    let header_bottom = top + i64::from(window_size.1.min(32));
+
+    monitors.into_iter().any(|(x, y, width, height)| {
+        let monitor_left = i64::from(x);
+        let monitor_top = i64::from(y);
+        let monitor_right = monitor_left + i64::from(width);
+        let monitor_bottom = monitor_top + i64::from(height);
+        let visible_width = (header_right.min(monitor_right) - left.max(monitor_left)).max(0);
+        let visible_height = (header_bottom.min(monitor_bottom) - top.max(monitor_top)).max(0);
+        visible_width >= i64::from(window_size.0.min(80))
+            && visible_height >= i64::from(window_size.1.min(24))
+    })
+}
+
+fn restore_window_position(window: &tauri::WebviewWindow, position: Option<WindowPosition>) {
+    let _ = window.center();
+    let Some(position) = position.filter(|position| position.is_valid()) else {
+        return;
+    };
+    let (Ok(monitors), Ok(size)) = (window.available_monitors(), window.outer_size()) else {
+        return;
+    };
+    let monitor_bounds = monitors.iter().map(|monitor| {
+        let position = monitor.position();
+        let size = monitor.size();
+        (position.x, position.y, size.width, size.height)
+    });
+    if window_position_has_visible_header(position, (size.width, size.height), monitor_bounds) {
+        let _ = window.set_position(tauri::PhysicalPosition::new(position.x, position.y));
+    }
 }
 
 impl WindowSize {
@@ -201,6 +256,8 @@ pub struct Settings {
     pub normal_window_size: WindowSize,
     #[serde(default = "default_ultra_compact_window_size")]
     pub ultra_compact_window_size: WindowSize,
+    #[serde(default)]
+    pub window_position: Option<WindowPosition>,
 }
 
 struct LanguageState(Mutex<Language>);
@@ -214,7 +271,7 @@ struct WindowModeTracker(Arc<Mutex<WindowModeSnapshot>>);
 struct PanelReadyState(AtomicBool);
 
 #[derive(Clone)]
-struct WindowSizeSaveChannel(mpsc::Sender<WindowSizeSaveRequest>);
+struct WindowGeometrySaveChannel(mpsc::Sender<WindowGeometrySaveRequest>);
 
 #[derive(Clone, Copy)]
 struct WindowModeSnapshot {
@@ -224,11 +281,28 @@ struct WindowModeSnapshot {
     settings_height: Option<f64>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct WindowSizeSaveRequest {
     ultra_compact: bool,
     revision: u64,
     size: WindowSize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct WindowGeometrySaveRequest {
+    size: Option<WindowSizeSaveRequest>,
+    position: Option<WindowPosition>,
+}
+
+impl WindowGeometrySaveRequest {
+    fn merge(&mut self, next: Self) {
+        if next.size.is_some() {
+            self.size = next.size;
+        }
+        if next.position.is_some() {
+            self.position = next.position;
+        }
+    }
 }
 
 fn default_ui_scale() -> u16 {
@@ -256,6 +330,7 @@ impl Default for Settings {
             ultra_compact: false,
             normal_window_size: default_normal_window_size(),
             ultra_compact_window_size: default_ultra_compact_window_size(),
+            window_position: None,
         }
     }
 }
@@ -270,6 +345,7 @@ impl Settings {
             && self.threshold_weekly.fract() == 0.0
             && (80..=150).contains(&self.ui_scale)
             && self.ui_scale % 10 == 0
+            && self.window_position.map_or(true, WindowPosition::is_valid)
     }
 }
 
@@ -317,6 +393,7 @@ fn save_settings(app: AppHandle, settings: serde_json::Value) -> Result<Settings
             "alwaysOnTop",
             "closeAction",
             "ultraCompact",
+            "windowPosition",
         ]
         .contains(&key.as_str())
         {
@@ -370,6 +447,12 @@ fn decode_settings(value: serde_json::Value) -> Result<Settings, String> {
             "alwaysOnTop" | "ultraCompact" => value.is_boolean(),
             "normalWindowSize" | "ultraCompactWindowSize" => {
                 serde_json::from_value::<WindowSize>(value.clone()).is_ok()
+            }
+            "windowPosition" => {
+                value.is_null()
+                    || serde_json::from_value::<WindowPosition>(value.clone())
+                        .map(WindowPosition::is_valid)
+                        .unwrap_or(false)
             }
             _ => false,
         };
@@ -554,7 +637,7 @@ fn set_ultra_compact(
     }
 
     if let Some(writer) = app
-        .try_state::<WindowSizeSaveChannel>()
+        .try_state::<WindowGeometrySaveChannel>()
         .map(|state| state.0.clone())
     {
         schedule_window_size_checkpoint(app.clone(), window, tracker.inner().clone(), writer);
@@ -642,6 +725,12 @@ fn set_always_on_top(app: AppHandle, always_on_top: bool) -> Result<(), String> 
 
 #[tauri::command]
 fn quit_app(app: AppHandle, runtime: State<'_, AppRuntime>) {
+    if let (Some(window), Some(tracker)) = (
+        app.get_webview_window("main"),
+        app.try_state::<WindowModeTracker>(),
+    ) {
+        persist_current_window_position(&app, &window, tracker.inner());
+    }
     request_backend_shutdown(&runtime.commands);
     app.exit(0);
 }
@@ -666,7 +755,7 @@ fn show_panel(app: &AppHandle) {
 }
 
 fn queue_window_size_save(
-    writer: &mpsc::Sender<WindowSizeSaveRequest>,
+    writer: &mpsc::Sender<WindowGeometrySaveRequest>,
     tracker: &WindowModeTracker,
     size: WindowSize,
 ) {
@@ -677,17 +766,36 @@ fn queue_window_size_save(
         {
             return;
         }
-        let _ = writer.send(WindowSizeSaveRequest {
-            ultra_compact: snapshot.ultra_compact,
-            revision: snapshot.revision,
-            size,
+        let _ = writer.send(WindowGeometrySaveRequest {
+            size: Some(WindowSizeSaveRequest {
+                ultra_compact: snapshot.ultra_compact,
+                revision: snapshot.revision,
+                size,
+            }),
+            position: None,
+        });
+    }
+}
+
+fn queue_window_position_save(
+    writer: &mpsc::Sender<WindowGeometrySaveRequest>,
+    position: &tauri::PhysicalPosition<i32>,
+) {
+    let position = WindowPosition {
+        x: position.x,
+        y: position.y,
+    };
+    if position.is_valid() {
+        let _ = writer.send(WindowGeometrySaveRequest {
+            size: None,
+            position: Some(position),
         });
     }
 }
 
 fn queue_current_window_size_save(
     window: &tauri::WebviewWindow,
-    writer: &mpsc::Sender<WindowSizeSaveRequest>,
+    writer: &mpsc::Sender<WindowGeometrySaveRequest>,
     tracker: &WindowModeTracker,
 ) {
     let scale_factor = window.scale_factor().unwrap_or(1.0);
@@ -701,11 +809,20 @@ fn queue_current_window_size_save(
     queue_window_size_save(writer, tracker, size);
 }
 
+fn queue_current_window_position_save(
+    window: &tauri::WebviewWindow,
+    writer: &mpsc::Sender<WindowGeometrySaveRequest>,
+) {
+    if let Ok(position) = window.outer_position() {
+        queue_window_position_save(writer, &position);
+    }
+}
+
 fn schedule_window_size_checkpoint(
     app: AppHandle,
     window: tauri::WebviewWindow,
     tracker: WindowModeTracker,
-    writer: mpsc::Sender<WindowSizeSaveRequest>,
+    writer: mpsc::Sender<WindowGeometrySaveRequest>,
 ) {
     let _ = thread::Builder::new()
         .name("window-size-checkpoint".into())
@@ -717,10 +834,10 @@ fn schedule_window_size_checkpoint(
         });
 }
 
-fn persist_window_size_request(
+fn persist_window_geometry_request(
     app: &AppHandle,
     tracker: &WindowModeTracker,
-    request: WindowSizeSaveRequest,
+    request: WindowGeometrySaveRequest,
 ) {
     let Some(file_lock) = app.try_state::<SettingsFileLock>() else {
         return;
@@ -728,44 +845,83 @@ fn persist_window_size_request(
     let Ok(_guard) = file_lock.0.lock() else {
         return;
     };
-    let Ok(snapshot) = tracker.0.lock() else {
-        return;
-    };
-    if snapshot.settings_height.is_some()
-        || snapshot.revision != request.revision
-        || snapshot.ultra_compact != request.ultra_compact
-        || !request.size.is_valid_for(request.ultra_compact)
-    {
-        return;
-    }
     let Ok(mut settings) = try_read_settings_file(app) else {
         return;
     };
-    set_window_size_for(&mut settings, request.ultra_compact, request.size);
-    let _ = write_settings_file(app, &settings);
+    let mut changed = false;
+    if let Some(size) = request.size {
+        if let Ok(snapshot) = tracker.0.lock() {
+            if snapshot.settings_height.is_none()
+                && snapshot.revision == size.revision
+                && snapshot.ultra_compact == size.ultra_compact
+                && size.size.is_valid_for(size.ultra_compact)
+            {
+                set_window_size_for(&mut settings, size.ultra_compact, size.size);
+                changed = true;
+            }
+        }
+    }
+    if let Some(position) = request.position.filter(|position| position.is_valid()) {
+        if settings.window_position != Some(position) {
+            settings.window_position = Some(position);
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = write_settings_file(app, &settings);
+    }
 }
 
-fn start_window_size_writer(
+fn persist_current_window_position(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    tracker: &WindowModeTracker,
+) {
+    if let Ok(position) = window.outer_position() {
+        let position = WindowPosition {
+            x: position.x,
+            y: position.y,
+        };
+        if position.is_valid() {
+            persist_window_geometry_request(
+                app,
+                tracker,
+                WindowGeometrySaveRequest {
+                    size: None,
+                    position: Some(position),
+                },
+            );
+        }
+    }
+}
+
+fn start_window_geometry_writer(
     app: AppHandle,
-    receiver: mpsc::Receiver<WindowSizeSaveRequest>,
+    receiver: mpsc::Receiver<WindowGeometrySaveRequest>,
     tracker: WindowModeTracker,
 ) {
     let _ = thread::Builder::new()
-        .name("window-size-persistence".into())
+        .name("window-geometry-persistence".into())
         .spawn(move || {
-            let mut pending = None;
+            let mut pending: Option<WindowGeometrySaveRequest> = None;
             loop {
                 if pending.is_some() {
                     match receiver.recv_timeout(RESIZE_SAVE_DEBOUNCE) {
-                        Ok(request) => pending = Some(request),
+                        Ok(request) => {
+                            if let Some(pending) = pending.as_mut() {
+                                pending.merge(request);
+                            } else {
+                                pending = Some(request);
+                            }
+                        }
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             if let Some(request) = pending.take() {
-                                persist_window_size_request(&app, &tracker, request);
+                                persist_window_geometry_request(&app, &tracker, request);
                             }
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => {
                             if let Some(request) = pending.take() {
-                                persist_window_size_request(&app, &tracker, request);
+                                persist_window_geometry_request(&app, &tracker, request);
                             }
                             break;
                         }
@@ -1105,13 +1261,13 @@ pub fn run() {
             })));
             app.manage(window_mode_tracker.clone());
             app.manage(PanelReadyState(AtomicBool::new(false)));
-            let (window_size_tx, window_size_rx) = mpsc::channel();
-            start_window_size_writer(
+            let (window_geometry_tx, window_geometry_rx) = mpsc::channel();
+            start_window_geometry_writer(
                 app.handle().clone(),
-                window_size_rx,
+                window_geometry_rx,
                 window_mode_tracker.clone(),
             );
-            app.manage(WindowSizeSaveChannel(window_size_tx.clone()));
+            app.manage(WindowGeometrySaveChannel(window_geometry_tx.clone()));
             let initial_state = Arc::new(Mutex::new(UsageState::default()));
             let (command_tx, command_rx) = mpsc::channel();
             app.manage(AppRuntime {
@@ -1173,17 +1329,21 @@ pub fn run() {
                         normalized_window_size(window_size_for(&initial_settings, false), false);
                     let _ = set_window_size_for_mode(&window, false, normal_size);
                 }
+                restore_window_position(&window, initial_settings.window_position);
                 if let Ok(mut mode) = window_mode_tracker.0.lock() {
                     mode.ultra_compact = initial_mode_applied && initial_settings.ultra_compact;
                 }
                 let _ = window.set_always_on_top(initial_settings.always_on_top);
                 let _ = window.set_skip_taskbar(true);
                 let close_target = window.clone();
+                let close_app = app.handle().clone();
+                let close_tracker = window_mode_tracker.clone();
                 let resize_target = window.clone();
-                let resize_writer = window_size_tx.clone();
+                let geometry_writer = window_geometry_tx.clone();
                 let resize_tracker = window_mode_tracker.clone();
                 window.on_window_event(move |event| match event {
                     WindowEvent::CloseRequested { api, .. } => {
+                        persist_current_window_position(&close_app, &close_target, &close_tracker);
                         api.prevent_close();
                         let _ = close_target.emit("close-requested", ());
                     }
@@ -1192,15 +1352,19 @@ pub fn run() {
                         if let Some(size) =
                             WindowSize::from_physical(size.width, size.height, scale_factor)
                         {
-                            queue_window_size_save(&resize_writer, &resize_tracker, size);
+                            queue_window_size_save(&geometry_writer, &resize_tracker, size);
                         }
+                    }
+                    WindowEvent::Moved(position) => {
+                        queue_window_position_save(&geometry_writer, position);
                     }
                     WindowEvent::Focused(false) => {
                         queue_current_window_size_save(
                             &resize_target,
-                            &resize_writer,
+                            &geometry_writer,
                             &resize_tracker,
                         );
+                        queue_current_window_position_save(&resize_target, &geometry_writer);
                     }
                     _ => {}
                 });
@@ -1260,6 +1424,7 @@ mod tests {
             ultra_compact: false,
             normal_window_size: default_normal_window_size(),
             ultra_compact_window_size: default_ultra_compact_window_size(),
+            window_position: None,
         }
         .is_valid());
         assert!(!Settings {
@@ -1273,6 +1438,7 @@ mod tests {
             ultra_compact: false,
             normal_window_size: default_normal_window_size(),
             ultra_compact_window_size: default_ultra_compact_window_size(),
+            window_position: None,
         }
         .is_valid());
         assert!(!Settings {
@@ -1286,6 +1452,7 @@ mod tests {
             ultra_compact: false,
             normal_window_size: default_normal_window_size(),
             ultra_compact_window_size: default_ultra_compact_window_size(),
+            window_position: None,
         }
         .is_valid());
     }
@@ -1305,7 +1472,8 @@ mod tests {
                 "closeAction": "ask",
                 "ultraCompact": false,
                 "normalWindowSize": { "width": 360.0, "height": 220.0 },
-                "ultraCompactWindowSize": { "width": 300.0, "height": 156.0 }
+                "ultraCompactWindowSize": { "width": 300.0, "height": 156.0 },
+                "windowPosition": null
             })
         );
         let decoded: Settings = serde_json::from_value(encoded).unwrap();
@@ -1320,6 +1488,7 @@ mod tests {
             decoded.ultra_compact_window_size,
             default_ultra_compact_window_size()
         );
+        assert_eq!(decoded.window_position, None);
     }
 
     #[test]
@@ -1341,6 +1510,81 @@ mod tests {
             decoded.ultra_compact_window_size,
             default_ultra_compact_window_size()
         );
+        assert_eq!(decoded.window_position, None);
+    }
+
+    #[test]
+    fn window_position_round_trips_for_monitors_left_of_primary() {
+        let decoded = decode_settings(serde_json::json!({
+            "windowPosition": { "x": -1920, "y": 120 }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            decoded.window_position,
+            Some(WindowPosition { x: -1920, y: 120 })
+        );
+    }
+
+    #[test]
+    fn invalid_window_position_is_ignored_without_losing_other_preferences() {
+        let decoded = decode_settings(serde_json::json!({
+            "threshold5h": 17,
+            "windowPosition": { "x": 100_000, "y": 40 }
+        }))
+        .unwrap();
+
+        assert_eq!(decoded.threshold_5h, 17.0);
+        assert_eq!(decoded.window_position, None);
+    }
+
+    #[test]
+    fn geometry_save_requests_keep_the_latest_size_and_position() {
+        let size = |width| WindowSizeSaveRequest {
+            ultra_compact: false,
+            revision: 1,
+            size: WindowSize {
+                width,
+                height: NORMAL_WINDOW_SIZE.1,
+            },
+        };
+        let mut request = WindowGeometrySaveRequest {
+            size: Some(size(360.0)),
+            position: Some(WindowPosition { x: 12, y: 34 }),
+        };
+
+        request.merge(WindowGeometrySaveRequest {
+            size: None,
+            position: Some(WindowPosition { x: -1920, y: 0 }),
+        });
+        request.merge(WindowGeometrySaveRequest {
+            size: Some(size(420.0)),
+            position: None,
+        });
+
+        assert_eq!(request.size, Some(size(420.0)));
+        assert_eq!(request.position, Some(WindowPosition { x: -1920, y: 0 }));
+    }
+
+    #[test]
+    fn saved_position_requires_a_visible_header_area() {
+        let monitor = [(-1920, 0, 1920, 1080)];
+
+        assert!(window_position_has_visible_header(
+            WindowPosition { x: -1900, y: 20 },
+            (300, 156),
+            monitor
+        ));
+        assert!(!window_position_has_visible_header(
+            WindowPosition { x: -3000, y: 20 },
+            (300, 156),
+            monitor
+        ));
+        assert!(!window_position_has_visible_header(
+            WindowPosition { x: -1980, y: 20 },
+            (300, 156),
+            monitor
+        ));
     }
 
     #[test]
