@@ -609,7 +609,9 @@ test("plays one reset or threshold sound only for a fresh valid crossing", async
   await installTauriMock(page, { settings: { soundEnabled: true } });
   expect(await page.evaluate(() => window.__mockAudioCalls)).toEqual([]);
 
-  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(20, 20));
+  const thresholdCrossing = usageState(20, 20);
+  thresholdCrossing.lastUpdatedAt += 1_000;
+  await page.evaluate((state) => window.__mockEmitUsage(state), thresholdCrossing);
   await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(1);
   expect(await page.evaluate(() => window.__mockAudioCalls[0])).toContain("threshold.mp3");
 
@@ -623,11 +625,14 @@ test("plays one reset or threshold sound only for a fresh valid crossing", async
     const state = structuredClone(window.__mockCurrentUsage);
     state.fiveHour.remainingFraction = 1;
     state.fiveHour.remainingPercent = "100";
-    state.fiveHour.resetsAt += 300;
+    state.fiveHour.usedPercent = "0";
+    const previousReset = state.fiveHour.resetsAt;
+    state.lastUpdatedAt = previousReset * 1_000 + 1_000;
+    state.fiveHour.resetsAt += 18_000;
     state.weekly.remainingFraction = 1;
     state.weekly.remainingPercent = "100";
-    state.weekly.resetsAt += 300;
-    state.lastUpdatedAt = state.fiveHour.resetsAt - 299;
+    state.weekly.usedPercent = "0";
+    state.weekly.resetsAt += 604_800;
     delete state.revision;
     return state;
   });
@@ -635,17 +640,164 @@ test("plays one reset or threshold sound only for a fresh valid crossing", async
   await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(2);
   expect(await page.evaluate(() => window.__mockAudioCalls[1])).toContain("reset.mp3");
 
-  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(19, 20));
+  const lateReconciliation = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt += 1_000;
+    state.fiveHour.resetsAt += 1;
+    state.weekly.resetsAt += 1;
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), lateReconciliation);
+  await page.waitForTimeout(25);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toHaveLength(2);
+
+  const thresholdAfterReset = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt += 1_000;
+    state.fiveHour.remainingFraction = 0.19;
+    state.fiveHour.remainingPercent = "19";
+    state.fiveHour.usedPercent = "81";
+    state.weekly.remainingFraction = 0.2;
+    state.weekly.remainingPercent = "20";
+    state.weekly.usedPercent = "80";
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), thresholdAfterReset);
   await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(3);
   expect(await page.evaluate(() => window.__mockAudioCalls[2])).toContain("threshold.mp3");
 
-  await page.evaluate(() => window.__mockEmitUsage({ status: "online", fiveHour: null, weekly: null }));
-  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(0, 0));
-  await page.evaluate((state) => window.__mockEmitUsage({ ...state, lastUpdatedAt: null }), usageState(100, 100));
-  await page.evaluate((state) => window.__mockEmitUsage({ ...state, status: "stale" }), usageState(0, 0));
-  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(0, 0));
+  const invalid = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt += 1_000;
+    state.fiveHour = null;
+    state.weekly = null;
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), invalid);
+  const recovered = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt += 1_000;
+    state.fiveHour = {
+      windowDurationMins: 300,
+      usedPercent: "100",
+      remainingPercent: "0",
+      remainingFraction: 0,
+      resetsAt: 1_792_000_000,
+    };
+    state.weekly = {
+      windowDurationMins: 10_080,
+      usedPercent: "100",
+      remainingPercent: "0",
+      remainingFraction: 0,
+      resetsAt: 1_792_000_000,
+    };
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), recovered);
+  const disconnected = await page.evaluate(() => ({
+    ...window.__mockCurrentUsage,
+    revision: undefined,
+    status: "stale",
+    lastUpdatedAt: window.__mockCurrentUsage.lastUpdatedAt + 1_000,
+  }));
+  await page.evaluate((state) => window.__mockEmitUsage(state), disconnected);
+  const resumed = await page.evaluate(() => ({
+    ...window.__mockCurrentUsage,
+    revision: undefined,
+    status: "online",
+    lastUpdatedAt: window.__mockCurrentUsage.lastUpdatedAt + 1_000,
+  }));
+  await page.evaluate((state) => window.__mockEmitUsage(state), resumed);
   await page.waitForTimeout(25);
   expect(await page.evaluate(() => window.__mockAudioCalls)).toHaveLength(3);
+});
+
+test("detects each reset boundary once across delayed reconciliation snapshots", async ({ page }) => {
+  const initial = usageState(70, 80);
+  initial.weekly.resetsAt += 3_600;
+  initial.lastUpdatedAt = initial.fiveHour.resetsAt * 1_000 - 2_000;
+  await installTauriMock(page, { settings: { soundEnabled: true }, usageState: initial });
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toEqual([]);
+
+  const fiveHourReset = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt = state.fiveHour.resetsAt * 1_000 + 1_000;
+    state.fiveHour.resetsAt += 18_000;
+    state.fiveHour.remainingFraction = 1;
+    state.fiveHour.remainingPercent = "100";
+    state.fiveHour.usedPercent = "0";
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), fiveHourReset);
+  await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(1);
+
+  const reconciliation = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt += 1_000;
+    state.fiveHour.resetsAt += 1;
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), reconciliation);
+  await page.waitForTimeout(25);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toHaveLength(1);
+
+  const weeklyReset = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt = state.weekly.resetsAt * 1_000 + 1_000;
+    state.weekly.resetsAt += 604_800;
+    state.weekly.remainingFraction = 1;
+    state.weekly.remainingPercent = "100";
+    state.weekly.usedPercent = "0";
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), weeklyReset);
+  await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(2);
+
+  const repeatedWeeklyRead = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.lastUpdatedAt += 1_000;
+    state.weekly.resetsAt += 1;
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), repeatedWeeklyRead);
+  await page.waitForTimeout(25);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toHaveLength(2);
+  expect(await page.evaluate(() => window.__mockAudioCalls.every((source) => source.includes("reset.mp3")))).toBe(true);
+});
+
+test("does not alert on an initial state already past reset and below threshold", async ({ page }) => {
+  const initial = usageState(10, 15);
+  initial.lastUpdatedAt = (initial.fiveHour.resetsAt + 1) * 1_000;
+  initial.fiveHour.resetsAt += 18_000;
+  initial.weekly.resetsAt += 604_800;
+  await installTauriMock(page, { settings: { soundEnabled: true }, usageState: initial });
+  await page.waitForTimeout(25);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toEqual([]);
+});
+
+test("ignores an older timestamp even when a newer revision crosses the threshold", async ({ page }) => {
+  const initial = usageState(70, 70);
+  await installTauriMock(page, { settings: { soundEnabled: true }, usageState: initial });
+
+  const delayedRead = usageState(19, 70);
+  delayedRead.lastUpdatedAt = initial.lastUpdatedAt - 1_000;
+  await page.evaluate((state) => window.__mockEmitUsage(state), delayedRead);
+  await page.waitForTimeout(25);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toEqual([]);
+
+  const confirmedRead = usageState(19, 70);
+  confirmedRead.lastUpdatedAt = initial.lastUpdatedAt + 1_000;
+  await page.evaluate((state) => window.__mockEmitUsage(state), confirmedRead);
+  await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(1);
+  expect(await page.evaluate(() => window.__mockAudioCalls[0])).toContain("threshold.mp3");
 });
 
 test("pauses panel rendering in the tray while keeping sounds and tray data current", async ({ page }) => {

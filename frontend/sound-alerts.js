@@ -16,7 +16,7 @@
     const resetsAt = Number(windowData.resetsAt);
     if (!Number.isFinite(remaining) || remaining < 0 || remaining > 100
       || !Number.isFinite(fraction) || fraction < 0 || fraction > 1
-      || !Number.isFinite(resetsAt) || resetsAt <= 0) return null;
+      || !Number.isSafeInteger(resetsAt) || resetsAt <= 0) return null;
     return { remaining, resetsAt };
   }
 
@@ -48,17 +48,22 @@
         weekly: Number(thresholds.weekly),
       },
     };
-    if (!Number.isFinite(current.updatedAt) || current.updatedAt <= 0) {
+    if (!Number.isSafeInteger(current.updatedAt) || current.updatedAt <= 0) {
       previous = null;
       return;
     }
+    if (previous && current.updatedAt < previous.updatedAt) return;
     const sounds = new Set();
     if (previous) {
       for (const period of ["fiveHour", "weekly"]) {
         const before = previous[period];
         const after = current[period];
         if (!before || !after) continue;
-        if (current.updatedAt >= before.resetsAt && after.resetsAt > before.resetsAt) {
+        const resetBoundary = before.resetsAt * 1_000;
+        if (Number.isSafeInteger(resetBoundary)
+          && previous.updatedAt < resetBoundary
+          && current.updatedAt >= resetBoundary
+          && after.resetsAt > before.resetsAt) {
           sounds.add("reset");
         } else if (previous.thresholds[period] === current.thresholds[period]
           && before.remaining > current.thresholds[period]

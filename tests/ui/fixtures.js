@@ -49,7 +49,7 @@ function quota(remaining, windowDurationMins) {
 function usageState(remaining5h = 72, remainingWeekly = 64, status = "online") {
   return {
     status,
-    lastUpdatedAt: 1_791_999_000,
+    lastUpdatedAt: 1_791_999_000_000,
     fiveHour: remaining5h === null ? null : quota(remaining5h, 300),
     weekly: remainingWeekly === null ? null : quota(remainingWeekly, 10_080),
   };
@@ -92,7 +92,7 @@ async function installTauriMock(page, options = {}, route = "/") {
     }
     let currentUsage = config.usageState ?? {
       status: "online",
-      lastUpdatedAt: 1_791_999_000,
+      lastUpdatedAt: 1_791_999_000_000,
       fiveHour: {
         windowDurationMins: 300,
         usedPercent: "28",
