@@ -14,6 +14,8 @@ const translations = {
     windowActions: "Window actions",
     alwaysOnTopLabel: "Keep the window on top",
     settingsButton: "Settings",
+    soundAlertsOn: "Mute sound alerts",
+    soundAlertsOff: "Enable sound alerts",
     back: "Back",
     minimize: "Minimize",
     close: "Close",
@@ -78,6 +80,8 @@ const translations = {
     windowActions: "Acciones de la ventana",
     alwaysOnTopLabel: "Mantener la ventana siempre encima",
     settingsButton: "Configuración",
+    soundAlertsOn: "Silenciar alertas de sonido",
+    soundAlertsOff: "Activar alertas de sonido",
     back: "Volver",
     minimize: "Minimizar",
     close: "Cerrar",
@@ -141,6 +145,7 @@ const initialSettings = {
   thresholdWeekly: 20,
   uiScale: 100,
   alwaysOnTop: true,
+  soundEnabled: false,
   closeAction: "ask",
   language: "en",
   ultraCompact: false,
@@ -152,6 +157,7 @@ let preferencesError = false;
 let eventsError = false;
 let presentationError = false;
 let lastUsageRevision = -1;
+let panelVisible = false;
 let settingsFitChain = Promise.resolve();
 let lastSettingsHeight = 0;
 let settingsFitRevision = 0;
@@ -188,6 +194,9 @@ const elements = {
   settingsButton: document.getElementById("settings-button"),
   settingsIcon: document.querySelector("#settings-button .settings-icon"),
   backIcon: document.querySelector("#settings-button .back-icon"),
+  soundToggle: document.getElementById("sound-toggle"),
+  soundEnabledIcon: document.querySelector("#sound-toggle .lucide-icon--bell"),
+  soundMutedIcon: document.querySelector("#sound-toggle .lucide-icon--bell-off"),
   generalTab: document.getElementById("general-tab"),
   limitsTab: document.getElementById("limits-tab"),
   generalPanel: document.getElementById("general-panel"),
@@ -249,6 +258,7 @@ function applyLocalization() {
   updateAlwaysOnTopToggle();
   updateUltraCompactButton();
   updateSettingsButtonLabel();
+  updateSoundToggle();
   updateRememberedCloseSetting();
   renderSaveMessage();
   renderAppVersion();
@@ -369,6 +379,7 @@ function renderQuota(card, percentNode, meter, resetNode, windowData, threshold)
 }
 
 function render() {
+  if (!panelVisible) return;
   const canShowUsage = usageState.status === "online" || usageState.status === "refreshing";
   const hasUsageError = usageState.status !== "online";
   elements.appShell.dataset.hasStatus = String(hasUsageError || windowModeError || preferencesError || presentationError || eventsError);
@@ -392,17 +403,30 @@ function render() {
     canShowUsage ? usageState.weekly : null,
     settings.thresholdWeekly,
   );
-  if (Number.isSafeInteger(usageState.revision)) {
-    const tooltip = (label, data) => `${label}: ${canShowUsage && data ? formatPercent(data.remainingPercent) + " " + copy("remaining") + " · " + formatReset(Number(data.resetsAt)) : copy("quotaUnavailable")}`;
-    void invoke("set_tray_tooltips", { fiveHour: tooltip(copy("fiveHour"), usageState.fiveHour), weekly: tooltip(copy("weekly"), usageState.weekly), revision: usageState.revision }).catch(() => {});
-  }
+  updateTrayTooltips();
+}
+
+function updateTrayTooltips() {
+  if (!Number.isSafeInteger(usageState.revision)) return;
+  const canShowUsage = usageState.status === "online" || usageState.status === "refreshing";
+  const tooltip = (label, data) => `${label}: ${canShowUsage && data ? formatPercent(data.remainingPercent) + " " + copy("remaining") + " · " + formatReset(Number(data.resetsAt)) : copy("quotaUnavailable")}`;
+  void invoke("set_tray_tooltips", {
+    fiveHour: tooltip(copy("fiveHour"), usageState.fiveHour),
+    weekly: tooltip(copy("weekly"), usageState.weekly),
+    revision: usageState.revision,
+  }).catch(() => {});
 }
 
 function acceptUsageState(next) {
-  if (!next || !Number.isSafeInteger(next.revision) || next.revision < lastUsageRevision) return;
+  if (!next || !Number.isSafeInteger(next.revision) || next.revision <= lastUsageRevision) return;
   lastUsageRevision = next.revision;
   usageState = next;
-  render();
+  window.WimuSoundAlerts.accept(next, {
+    fiveHour: settings.threshold5h,
+    weekly: settings.thresholdWeekly,
+  }, settings.soundEnabled);
+  if (panelVisible) render();
+  else updateTrayTooltips();
 }
 
 async function synchronizeUsage() {
@@ -433,6 +457,7 @@ function settingsMatch(left, right) {
     && left.thresholdWeekly === right.thresholdWeekly
     && left.uiScale === right.uiScale
     && left.alwaysOnTop === right.alwaysOnTop
+    && left.soundEnabled === right.soundEnabled
     && left.closeAction === right.closeAction
     && left.language === right.language
     && left.ultraCompact === right.ultraCompact;
@@ -523,6 +548,22 @@ function bindThreshold(range, number, key) {
 
 function updateAlwaysOnTopToggle() {
   elements.alwaysOnTopToggle.checked = settings.alwaysOnTop;
+}
+
+function updateSoundToggle() {
+  const enabled = settings.soundEnabled;
+  const label = copy(enabled ? "soundAlertsOn" : "soundAlertsOff");
+  elements.soundToggle.setAttribute("aria-pressed", String(enabled));
+  elements.soundToggle.setAttribute("aria-label", label);
+  elements.soundToggle.title = label;
+  elements.soundEnabledIcon.hidden = !enabled;
+  elements.soundMutedIcon.hidden = enabled;
+}
+
+function toggleSoundAlerts() {
+  settings = { ...settings, soundEnabled: !settings.soundEnabled };
+  updateSoundToggle();
+  queueSettingsSave(0);
 }
 
 function updateUltraCompactButton() {
@@ -836,15 +877,27 @@ function closeCloseDialog() {
   elements.closeButton.focus();
 }
 
+function setPanelVisible(visible) {
+  panelVisible = visible;
+  elements.appShell.dataset.panelVisible = String(visible);
+  if (visible) render();
+}
+
+function restorePanel() {
+  setPanelVisible(true);
+  void synchronizeUsage();
+}
+
 async function minimizeFromCloseDialog() {
   await chooseCloseAction("minimize");
 }
 
 async function minimizePanel() {
+  setPanelVisible(false);
   try {
     await invoke("minimize_panel");
   } catch {
-    // Keep the panel open if the native window could not be hidden.
+    setPanelVisible(true);
   }
 }
 
@@ -905,6 +958,7 @@ async function resetClosePreference() {
 }
 
 elements.minimizeButton.addEventListener("click", minimizePanel);
+elements.soundToggle.addEventListener("click", toggleSoundAlerts);
 elements.alwaysOnTopToggle.addEventListener("change", toggleAlwaysOnTop);
 elements.ultraCompactButton.addEventListener("click", toggleUltraCompact);
 elements.settingsButton.addEventListener("click", () => {
@@ -967,7 +1021,7 @@ async function initialize() {
     await listen("usage-state", (event) => acceptUsageState(event.payload));
   } catch { eventsError = true; }
   try { await listen("close-requested", openCloseDialog); } catch {}
-  try { await listen("panel-restored", synchronizeUsage); } catch {}
+  try { await listen("panel-restored", restorePanel); } catch {}
   try {
     const saved = await invoke("load_settings");
     settings = { ...initialSettings, ...saved };
@@ -990,7 +1044,7 @@ async function initialize() {
   catch { setSaveMessage("topmostError", true); }
   await synchronizeUsage();
   await versionReady;
-  render();
+  setPanelVisible(true);
   await waitForPaint();
   try { await invoke("show_main_panel"); }
   catch { windowModeError = true; render(); }

@@ -1,0 +1,75 @@
+"use strict";
+
+(() => {
+  const audioFiles = {
+    reset: "./assets/sounds/reset.mp3",
+    threshold: "./assets/sounds/threshold.mp3",
+  };
+  const audioPlayers = new Map();
+  let lastRevision = -1;
+  let previous = null;
+
+  function validWindow(windowData) {
+    if (!windowData || typeof windowData !== "object") return null;
+    const remaining = Number(windowData.remainingPercent);
+    const fraction = Number(windowData.remainingFraction);
+    const resetsAt = Number(windowData.resetsAt);
+    if (!Number.isFinite(remaining) || remaining < 0 || remaining > 100
+      || !Number.isFinite(fraction) || fraction < 0 || fraction > 1
+      || !Number.isFinite(resetsAt) || resetsAt <= 0) return null;
+    return { remaining, resetsAt };
+  }
+
+  function play(name) {
+    let player = audioPlayers.get(name);
+    if (!player) {
+      player = new Audio(new URL(audioFiles[name], document.baseURI));
+      player.preload = "none";
+      audioPlayers.set(name, player);
+    }
+    player.currentTime = 0;
+    player.play()?.catch(() => {});
+  }
+
+  function accept(state, thresholds, enabled) {
+    if (!state || !Number.isSafeInteger(state.revision) || state.revision <= lastRevision) return;
+    lastRevision = state.revision;
+    if (state.status !== "online") {
+      previous = null;
+      return;
+    }
+
+    const current = {
+      fiveHour: validWindow(state.fiveHour),
+      weekly: validWindow(state.weekly),
+      updatedAt: Number(state.lastUpdatedAt),
+      thresholds: {
+        fiveHour: Number(thresholds.fiveHour),
+        weekly: Number(thresholds.weekly),
+      },
+    };
+    if (!Number.isFinite(current.updatedAt) || current.updatedAt <= 0) {
+      previous = null;
+      return;
+    }
+    const sounds = new Set();
+    if (previous) {
+      for (const period of ["fiveHour", "weekly"]) {
+        const before = previous[period];
+        const after = current[period];
+        if (!before || !after) continue;
+        if (current.updatedAt >= before.resetsAt && after.resetsAt > before.resetsAt) {
+          sounds.add("reset");
+        } else if (previous.thresholds[period] === current.thresholds[period]
+          && before.remaining > current.thresholds[period]
+          && after.remaining <= current.thresholds[period]) {
+          sounds.add("threshold");
+        }
+      }
+    }
+    previous = current;
+    if (enabled) for (const sound of sounds) play(sound);
+  }
+
+  window.WimuSoundAlerts = { accept };
+})();

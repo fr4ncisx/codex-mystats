@@ -64,6 +64,11 @@ button { color: inherit; }
   pointer-events: none;
 }
 
+.app-shell[data-panel-visible="false"] .meter-fill,
+.app-shell[data-panel-visible="false"] .meter-bubble {
+  animation-play-state: paused;
+}
+
 .resize-edge {
   position: absolute;
   z-index: 10;
@@ -180,7 +185,9 @@ button { color: inherit; }
 .lucide-icon--refresh { --icon-source: url("./assets/icons/refresh-cw.svg"); }
 .lucide-icon--pin { --icon-source: url("./assets/icons/pin.svg"); }
 .lucide-icon--pin-off { --icon-source: url("./assets/icons/pin-off.svg"); }
-.lucide-icon--settings { --icon-source: url("./assets/icons/sliders-horizontal.svg"); }
+.lucide-icon--settings { --icon-source: url("./assets/icons/settings.svg"); }
+.lucide-icon--bell { --icon-source: url("./assets/icons/bell.svg"); }
+.lucide-icon--bell-off { --icon-source: url("./assets/icons/bell-off.svg"); }
 .lucide-icon--back { --icon-source: url("./assets/icons/arrow-left.svg"); }
 .lucide-icon--minimize { --icon-source: url("./assets/icons/minus.svg"); }
 .lucide-icon--close { --icon-source: url("./assets/icons/x.svg"); }

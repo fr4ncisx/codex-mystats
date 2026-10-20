@@ -5,7 +5,9 @@ These local interface icons are from [Lucide](https://lucide.dev/), package `luc
 - `refresh-cw.svg`
 - `pin.svg`
 - `pin-off.svg`
-- `sliders-horizontal.svg`
+- `settings.svg`
+- `bell.svg`
+- `bell-off.svg`
 - `arrow-left.svg`
 - `minus.svg`
 - `x.svg`

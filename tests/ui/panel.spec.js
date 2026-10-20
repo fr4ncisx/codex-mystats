@@ -46,11 +46,18 @@ async function verifyVisibleLayout(page, expectedSize) {
         reset: card.querySelector(".quota-reset").getBoundingClientRect(),
       };
     });
+    const brand = document.querySelector(".window-brand").getBoundingClientRect();
+    const actions = document.querySelector(".header-actions").getBoundingClientRect();
+    const buttons = [...document.querySelectorAll(".header-actions button")].map((button) => {
+      const rect = button.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+    });
     return {
       viewport: { width: innerWidth, height: innerHeight },
       ultraCompact: shellNode.dataset.ultraCompact,
       titleFontSize: getComputedStyle(titleNode).fontSize,
       shell: { width: shell.width, height: shell.height, bottom: shell.bottom },
+      header: { brandRight: brand.right, actionsLeft: actions.left, actionsRight: actions.right, buttons },
       document: {
         width: document.documentElement.scrollWidth,
         height: document.documentElement.scrollHeight,
@@ -65,6 +72,13 @@ async function verifyVisibleLayout(page, expectedSize) {
   expect(layout.shell.height).toBe(expectedSize.height);
   expect(layout.document.width).toBeLessThanOrEqual(expectedSize.width);
   expect(layout.document.height).toBeLessThanOrEqual(expectedSize.height);
+  expect(layout.header.brandRight).toBeLessThanOrEqual(layout.header.actionsLeft);
+  expect(layout.header.actionsRight).toBeLessThanOrEqual(expectedSize.width);
+  expect(layout.header.buttons).toHaveLength(5);
+  for (const button of layout.header.buttons) {
+    expect(button.width).toBeGreaterThanOrEqual(26);
+    expect(button.height).toBeGreaterThanOrEqual(26);
+  }
   for (const card of layout.cards) {
     expect(card.cardBottom, JSON.stringify(layout)).toBeLessThanOrEqual(layout.shell.bottom);
     expect(Math.abs(card.markerCenter - card.expectedMarkerCenter)).toBeLessThanOrEqual(1);
@@ -536,6 +550,121 @@ test("uses independent alert thresholds at warning and critical boundaries", asy
   await page.evaluate((state) => window.__mockEmitUsage(state), usageState(26, 51));
   await expect(page.locator("#five-hour-card")).not.toHaveClass(/quota--warning/);
   await expect(page.locator("#weekly-card")).not.toHaveClass(/quota--warning/);
+});
+
+test("keeps sound alerts off by default and persists the localized bell control", async ({ page }) => {
+  await installTauriMock(page, {});
+
+  const bell = page.locator("#sound-toggle");
+  await expect(bell).toHaveAttribute("aria-pressed", "false");
+  await expect(bell).toHaveAttribute("aria-label", "Enable sound alerts");
+  await expect(page.locator("#settings-button .lucide-icon--settings")).toHaveCSS(
+    "-webkit-mask-image",
+    /settings\.svg/,
+  );
+  await expect.poll(() => page.evaluate(() => window.__mockGetSettings().soundEnabled)).toBe(false);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toEqual([]);
+
+  await bell.click();
+  await expect(bell).toHaveAttribute("aria-pressed", "true");
+  await expect(bell).toHaveAttribute("aria-label", "Mute sound alerts");
+  await expect.poll(() => page.evaluate(() => window.__mockGetSettings().soundEnabled)).toBe(true);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "Español" }).click();
+  await expect(page.locator("#sound-toggle")).toHaveAttribute("aria-label", "Silenciar alertas de sonido");
+  await expect.poll(() => page.evaluate(() => window.__mockGetSettings().language)).toBe("es");
+
+  await page.reload();
+  await page.waitForFunction(() => window.__mockPanelShown === true);
+  await expect(page.locator("#sound-toggle")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#sound-toggle")).toHaveAttribute("aria-label", "Silenciar alertas de sonido");
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toEqual([]);
+});
+
+test("serves both bundled alert sounds as decodable short audio", async ({ page }) => {
+  await installTauriMock(page, {});
+  const durations = await page.evaluate(async () => {
+    const context = new AudioContext();
+    try {
+      const values = [];
+      for (const file of ["./assets/sounds/reset.mp3", "./assets/sounds/threshold.mp3"]) {
+        const response = await fetch(file);
+        if (!response.ok) throw new Error(`Could not load ${file}`);
+        const audio = await context.decodeAudioData(await response.arrayBuffer());
+        values.push(audio.duration);
+      }
+      return values;
+    } finally {
+      await context.close();
+    }
+  });
+  expect(durations).toHaveLength(2);
+  for (const duration of durations) {
+    expect(duration).toBeGreaterThan(0);
+    expect(duration).toBeLessThan(5);
+  }
+});
+
+test("plays one reset or threshold sound only for a fresh valid crossing", async ({ page }) => {
+  await installTauriMock(page, { settings: { soundEnabled: true } });
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toEqual([]);
+
+  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(20, 20));
+  await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(1);
+  expect(await page.evaluate(() => window.__mockAudioCalls[0])).toContain("threshold.mp3");
+
+  const repeated = await page.evaluate(() => window.__mockCurrentUsage);
+  await page.evaluate((state) => window.__mockEmitUsage(state), repeated);
+  await page.evaluate((state) => window.__mockEmitUsage({ ...state, revision: 1 }), repeated);
+  await page.waitForTimeout(25);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toHaveLength(1);
+
+  const reset = await page.evaluate(() => {
+    const state = structuredClone(window.__mockCurrentUsage);
+    state.fiveHour.remainingFraction = 1;
+    state.fiveHour.remainingPercent = "100";
+    state.fiveHour.resetsAt += 300;
+    state.weekly.remainingFraction = 1;
+    state.weekly.remainingPercent = "100";
+    state.weekly.resetsAt += 300;
+    state.lastUpdatedAt = state.fiveHour.resetsAt - 299;
+    delete state.revision;
+    return state;
+  });
+  await page.evaluate((state) => window.__mockEmitUsage(state), reset);
+  await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(2);
+  expect(await page.evaluate(() => window.__mockAudioCalls[1])).toContain("reset.mp3");
+
+  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(19, 20));
+  await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(3);
+  expect(await page.evaluate(() => window.__mockAudioCalls[2])).toContain("threshold.mp3");
+
+  await page.evaluate(() => window.__mockEmitUsage({ status: "online", fiveHour: null, weekly: null }));
+  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(0, 0));
+  await page.evaluate((state) => window.__mockEmitUsage({ ...state, lastUpdatedAt: null }), usageState(100, 100));
+  await page.evaluate((state) => window.__mockEmitUsage({ ...state, status: "stale" }), usageState(0, 0));
+  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(0, 0));
+  await page.waitForTimeout(25);
+  expect(await page.evaluate(() => window.__mockAudioCalls)).toHaveLength(3);
+});
+
+test("pauses panel rendering in the tray while keeping sounds and tray data current", async ({ page }) => {
+  await installTauriMock(page, { settings: { soundEnabled: true } });
+  await page.locator("#minimize-button").click();
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-panel-visible", "false");
+  await expect(page.locator("#five-hour-progress .meter-fill")).toHaveCSS("animation-play-state", "paused");
+  await expect(page.locator("#five-hour-percent")).toHaveText("72%");
+
+  await page.evaluate((state) => window.__mockEmitUsage(state), usageState(20, 64));
+  await expect.poll(() => page.evaluate(() => window.__mockAudioCalls.length)).toBe(1);
+  await expect(page.locator("#five-hour-percent")).toHaveText("72%");
+  await expect.poll(async () => (await page.evaluate(() => window.__mockTooltipValues.at(-1)?.fiveHour)) ?? "")
+    .toContain("20%");
+
+  await page.evaluate(() => window.__mockEmitRestored());
+  await expect(page.locator(".app-shell")).toHaveAttribute("data-panel-visible", "true");
+  await expect(page.locator("#five-hour-percent")).toHaveText("20%");
+  await expect(page.locator("#five-hour-progress .meter-fill")).toHaveCSS("animation-play-state", "running");
 });
 
 test("supports keyboard navigation and localized quota labels", async ({ page }) => {

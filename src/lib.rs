@@ -186,6 +186,8 @@ pub struct Settings {
     pub threshold_weekly: f64,
     #[serde(default, deserialize_with = "deserialize_language")]
     pub language: Language,
+    #[serde(default)]
+    pub sound_enabled: bool,
     // Kept so settings files from older versions remain readable.
     #[serde(default = "default_ui_scale")]
     pub ui_scale: u16,
@@ -247,6 +249,7 @@ impl Default for Settings {
             threshold_5h: 20.0,
             threshold_weekly: 20.0,
             language: Language::En,
+            sound_enabled: false,
             ui_scale: default_ui_scale(),
             always_on_top: default_always_on_top(),
             close_action: default_close_action(),
@@ -309,6 +312,7 @@ fn save_settings(app: AppHandle, settings: serde_json::Value) -> Result<Settings
             "threshold5h",
             "thresholdWeekly",
             "language",
+            "soundEnabled",
             "uiScale",
             "alwaysOnTop",
             "closeAction",
@@ -361,6 +365,7 @@ fn decode_settings(value: serde_json::Value) -> Result<Settings, String> {
                 .as_u64()
                 .is_some_and(|n| (80..=150).contains(&n) && n % 10 == 0),
             "language" => matches!(value.as_str(), Some("en" | "es")),
+            "soundEnabled" => value.is_boolean(),
             "closeAction" => matches!(value.as_str(), Some("ask" | "minimize" | "quit")),
             "alwaysOnTop" | "ultraCompact" => value.is_boolean(),
             "normalWindowSize" | "ultraCompactWindowSize" => {
@@ -615,10 +620,14 @@ fn show_main_panel(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn minimize_panel(app: AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.minimize();
-    }
+fn minimize_panel(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "No se pudo minimizar la ventana.".to_owned())?;
+    window
+        .minimize()
+        .map_err(|_| "No se pudo minimizar la ventana.".to_owned())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1244,6 +1253,7 @@ mod tests {
             threshold_5h: 100.1,
             threshold_weekly: 20.0,
             language: Language::En,
+            sound_enabled: false,
             ui_scale: 100,
             always_on_top: true,
             close_action: CloseAction::Ask,
@@ -1256,6 +1266,7 @@ mod tests {
             threshold_5h: f64::NAN,
             threshold_weekly: 20.0,
             language: Language::En,
+            sound_enabled: false,
             ui_scale: 100,
             always_on_top: true,
             close_action: CloseAction::Ask,
@@ -1268,6 +1279,7 @@ mod tests {
             threshold_5h: 20.0,
             threshold_weekly: 20.0,
             language: Language::En,
+            sound_enabled: false,
             ui_scale: 105,
             always_on_top: true,
             close_action: CloseAction::Ask,
@@ -1287,6 +1299,7 @@ mod tests {
                 "threshold5h": 20.0,
                 "thresholdWeekly": 20.0,
                 "language": "en",
+                "soundEnabled": false,
                 "uiScale": 100,
                 "alwaysOnTop": true,
                 "closeAction": "ask",
@@ -1299,6 +1312,7 @@ mod tests {
         assert_eq!(decoded.threshold_5h, 20.0);
         assert_eq!(decoded.ui_scale, 100);
         assert_eq!(decoded.language, Language::En);
+        assert!(!decoded.sound_enabled);
         assert!(decoded.always_on_top);
         assert!(!decoded.ultra_compact);
         assert_eq!(decoded.normal_window_size, default_normal_window_size());
@@ -1320,6 +1334,7 @@ mod tests {
         assert_eq!(decoded.ui_scale, 100);
         assert!(decoded.always_on_top);
         assert_eq!(decoded.language, Language::En);
+        assert!(!decoded.sound_enabled);
         assert!(!decoded.ultra_compact);
         assert_eq!(decoded.normal_window_size, default_normal_window_size());
         assert_eq!(
@@ -1673,11 +1688,12 @@ mod tests {
 
     #[test]
     fn invalid_legacy_field_preserves_close_choice_and_other_preferences() {
-        let settings = decode_settings(serde_json::json!({ "uiScale": 123, "threshold5h": 17, "closeAction": "minimize", "ultraCompact": true, "futureField": 1 })).unwrap();
+        let settings = decode_settings(serde_json::json!({ "uiScale": 123, "threshold5h": 17, "closeAction": "minimize", "ultraCompact": true, "soundEnabled": "invalid", "futureField": 1 })).unwrap();
         assert!(matches!(settings.close_action, CloseAction::Minimize));
         assert!(settings.ultra_compact);
         assert_eq!(settings.threshold_5h, 17.0);
         assert_eq!(settings.ui_scale, 100);
+        assert!(!settings.sound_enabled);
     }
 
     #[test]

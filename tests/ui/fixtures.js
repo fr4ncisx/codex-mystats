@@ -49,6 +49,7 @@ function quota(remaining, windowDurationMins) {
 function usageState(remaining5h = 72, remainingWeekly = 64, status = "online") {
   return {
     status,
+    lastUpdatedAt: 1_791_999_000,
     fiveHour: remaining5h === null ? null : quota(remaining5h, 300),
     weekly: remainingWeekly === null ? null : quota(remainingWeekly, 10_080),
   };
@@ -73,6 +74,7 @@ async function installTauriMock(page, options = {}, route = "/") {
       alwaysOnTop: true,
       closeAction: "ask",
       language: "en",
+      soundEnabled: false,
       ultraCompact: false,
       normalWindowSize: { width: 360, height: 220 },
       ultraCompactWindowSize: { width: 300, height: 156 },
@@ -90,6 +92,7 @@ async function installTauriMock(page, options = {}, route = "/") {
     }
     let currentUsage = config.usageState ?? {
       status: "online",
+      lastUpdatedAt: 1_791_999_000,
       fiveHour: {
         windowDurationMins: 300,
         usedPercent: "28",
@@ -119,6 +122,16 @@ async function installTauriMock(page, options = {}, route = "/") {
     let skipNativeResize = config.resizeFailure === true;
 
     window.__mockCalls = calls;
+    window.__mockAudioCalls = [];
+    window.Audio = class {
+      constructor(source) {
+        this.src = new URL(source, window.location.href).toString();
+      }
+      play() {
+        window.__mockAudioCalls.push(this.src);
+        return Promise.resolve();
+      }
+    };
     window.__mockFailures = failures;
     window.__mockCurrentUsage = currentUsage;
     window.__mockGetSettings = () => ({ ...settings });
@@ -132,10 +145,12 @@ async function installTauriMock(page, options = {}, route = "/") {
       for (const listener of listeners.get("preferences-updated") ?? []) listener({ payload });
     };
     window.__mockEmitUsage = (payload) => {
-      usageRevision = payload.revision ?? usageRevision + 1;
-      currentUsage = { ...payload, revision: usageRevision };
+      const revision = payload.revision ?? usageRevision + 1;
+      usageRevision = Math.max(usageRevision, revision);
+      const next = { ...payload, revision };
+      if (revision >= (currentUsage.revision ?? 0)) currentUsage = next;
       window.__mockCurrentUsage = currentUsage;
-      for (const listener of listeners.get("usage-state") ?? []) listener({ payload: currentUsage });
+      for (const listener of listeners.get("usage-state") ?? []) listener({ payload: next });
     };
     window.__mockEmitRestored = () => { for (const listener of listeners.get("panel-restored") ?? []) listener({ payload: null }); };
     window.__mockEmitCloseRequested = () => {
@@ -227,6 +242,7 @@ async function installTauriMock(page, options = {}, route = "/") {
             case "hide_tray_popup":
               return undefined;
             case "minimize_panel":
+              return undefined;
             case "quit_app":
               return undefined;
             default:

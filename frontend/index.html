@@ -7,10 +7,11 @@
     <title>WIMU</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="./usage-colors.js" defer></script>
+    <script src="./sound-alerts.js" defer></script>
     <script src="./app.js" defer></script>
   </head>
   <body>
-    <div class="app-shell" data-ultra-compact="false">
+    <div class="app-shell" data-ultra-compact="false" data-panel-visible="false">
       <span class="resize-edge resize-edge--east" data-resize-direction="East" aria-hidden="true"></span>
       <span class="resize-edge resize-edge--west" data-resize-direction="West" aria-hidden="true"></span>
       <header class="window-actions">
@@ -32,6 +33,17 @@
           >
             <span class="lucide-icon lucide-icon--compact" aria-hidden="true"></span>
             <span class="lucide-icon lucide-icon--expand" aria-hidden="true" hidden></span>
+          </button>
+          <button
+            class="icon-button"
+            id="sound-toggle"
+            type="button"
+            aria-label="Enable sound alerts"
+            title="Enable sound alerts"
+            aria-pressed="false"
+          >
+            <span class="lucide-icon lucide-icon--bell" aria-hidden="true"></span>
+            <span class="lucide-icon lucide-icon--bell-off" aria-hidden="true" hidden></span>
           </button>
           <button
             class="icon-button"
