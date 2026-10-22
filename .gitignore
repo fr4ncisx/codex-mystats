@@ -7,3 +7,4 @@
 /.playwright-browsers/
 /playwright-report/
 /test-results/
+/artifacts/ui-previews/
