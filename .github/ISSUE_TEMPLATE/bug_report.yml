@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a problem you can reproduce in WIMU.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Remove credentials, session files, and private Codex usage data from screenshots or logs.
+  - type: input
+    id: wimu-version
+    attributes:
+      label: WIMU version
+      description: Shown in the badge beside WIMU's name.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Usage limits
+        - Tray indicators
+        - Window or resizing
+        - Settings
+        - Sound alerts
+        - Startup or closing
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: window-mode
+    attributes:
+      label: Window mode
+      options:
+        - Normal
+        - Ultra-compact
+        - Settings
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Steps to reproduce
+      description: What did you expect, and what happened instead?
+      placeholder: |
+        1. Open WIMU...
+        Expected:
+        Actual:
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment (optional)
+      description: Include your Windows and Codex CLI versions. Add display scale for visual issues.
+      placeholder: "Windows ..., Codex CLI ..., 125% scale"
